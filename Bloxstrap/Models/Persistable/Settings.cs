@@ -48,6 +48,9 @@ namespace Bloxstrap.Models.Persistable
         public string FluxerPlayerYear { get; set; } = "2021";
         public string FluxerStudioYear { get; set; } = "2021";
         public bool ImportFluxerLauncherClients { get; set; } = true;
+        // fps cap applied by patching the client's task scheduler (see Fluxer/FpsUnlocker.cs)
+        // -1 leaves the client alone, 0 is unlimited
+        public int FluxerFpsCap { get; set; } = -1;
 
         // integration configuration
         public CleanerOptions CleanerOptions { get; set; } = CleanerOptions.TwoWeeks;

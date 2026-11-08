@@ -43,6 +43,11 @@ namespace Bloxstrap
 
         private const string ClientSettingsFile = "ClientSettings\\ClientAppSettings.json";
 
+        private const string FpsFlag = "DFIntTaskSchedulerTargetFps";
+
+        // client years whose task scheduler the memory fps unlocker can find
+        private static readonly string[] MemoryFpsUnlockYears = { "2019", "2020", "2021" };
+
         // the flags each fluxer client ships with, which our fast flags get merged on top of
         private const string ClientSettingsBaseFile = "ClientSettings\\ClientAppSettings.json.fluxstrap-base";
 
@@ -594,7 +599,7 @@ namespace Bloxstrap
                     autoclosePids.Add(pid);
             }
 
-            if (App.Settings.Prop.EnableActivityTracking || App.Settings.Prop.EnableWindowManipulation || App.LaunchSettings.TestModeFlag.Active || autoclosePids.Any())
+            if (App.Settings.Prop.EnableActivityTracking || App.Settings.Prop.EnableWindowManipulation || App.Settings.Prop.FluxerFpsCap >= 0 || App.LaunchSettings.TestModeFlag.Active || autoclosePids.Any())
             {
                 using var ipl = new InterProcessLock("Watcher", TimeSpan.FromSeconds(5));
 
@@ -1042,7 +1047,8 @@ namespace Bloxstrap
         private static readonly Dictionary<string, string> LegacyModPaths = new(StringComparer.OrdinalIgnoreCase)
         {
             { @"content\textures\Cursors\KeyboardMouse\ArrowCursor.png", @"content\textures\ArrowCursor.png" },
-            { @"content\textures\Cursors\KeyboardMouse\ArrowFarCursor.png", @"content\textures\ArrowFarCursor.png" }
+            { @"content\textures\Cursors\KeyboardMouse\ArrowFarCursor.png", @"content\textures\ArrowFarCursor.png" },
+            { @"content\sounds\ouch.ogg", @"content\sounds\uuhhh.mp3" }
         };
 
         /// <summary>
@@ -1134,8 +1140,11 @@ namespace Bloxstrap
             string clientSettings = Path.Combine(_latestVersionDirectory, ClientSettingsFile);
             string clientSettingsBase = Path.Combine(_latestVersionDirectory, ClientSettingsBaseFile);
 
-            // clients installed before we kept a copy: what's there now is still the stock file
-            if (!File.Exists(clientSettingsBase) && File.Exists(clientSettings))
+            // clients installed before we kept a copy: what's there now is still the stock file,
+            // unless we've written it ourselves before (clients that don't ship one, like 2022)
+            bool writtenBefore = App.RobloxState.Prop.ClientModManifests.GetValueOrDefault(_package.Folder)?.Contains(ClientSettingsFile) == true;
+
+            if (!File.Exists(clientSettingsBase) && File.Exists(clientSettings) && !writtenBefore)
                 File.Copy(clientSettings, clientSettingsBase);
 
             var merged = ReadJsonObject(clientSettingsBase);
@@ -1146,6 +1155,12 @@ namespace Bloxstrap
                 App.Logger.WriteLine(LOG_IDENT, "Not touching the client settings, one of them is unreadable");
                 return false;
             }
+
+            // the fps unlocker patches 2019-2021 in memory (see Watcher); the others get it through their flag instead
+            int fpsCap = App.Settings.Prop.FluxerFpsCap;
+
+            if (fpsCap >= 0 && !_package.IsStudio && !MemoryFpsUnlockYears.Contains(_package.Year) && !userFlags.ContainsKey(FpsFlag))
+                userFlags[FpsFlag] = fpsCap == 0 ? 9999 : fpsCap;
 
             // only hand player clients the flags they actually register (see Fluxer/FlagSupport.cs)
             // flags the client already ships with are always fine to override
@@ -1175,10 +1190,18 @@ namespace Bloxstrap
             // nothing to add, so hand the client its own file untouched
             if (applied == 0)
             {
-                if (File.Exists(clientSettingsBase) && (!File.Exists(clientSettings) || MD5Hash.FromFile(clientSettings) != MD5Hash.FromFile(clientSettingsBase)))
+                if (File.Exists(clientSettingsBase))
                 {
+                    if (!File.Exists(clientSettings) || MD5Hash.FromFile(clientSettings) != MD5Hash.FromFile(clientSettingsBase))
+                    {
+                        PrepareForWrite(clientSettings);
+                        File.Copy(clientSettingsBase, clientSettings);
+                    }
+                }
+                else if (File.Exists(clientSettings))
+                {
+                    // the client didn't ship a settings file, so this one is ours from an earlier launch
                     PrepareForWrite(clientSettings);
-                    File.Copy(clientSettingsBase, clientSettings);
                 }
 
                 return true;
@@ -1352,6 +1375,15 @@ namespace Bloxstrap
                 }
 
                 if (!CopyModFile(file, target))
+                    success = false;
+            }
+
+            // the fps unlocker can need the client settings written even with no fast flags of the user's own
+            if (!modFolderFiles.Contains(ClientSettingsFile) && App.Settings.Prop.FluxerFpsCap >= 0)
+            {
+                modFolderFiles.Add(ClientSettingsFile);
+
+                if (!ApplyFastFlags(Path.Combine(Paths.Modifications, ClientSettingsFile)))
                     success = false;
             }
 

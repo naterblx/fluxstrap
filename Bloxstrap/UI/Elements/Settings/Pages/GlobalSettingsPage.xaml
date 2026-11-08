@@ -37,14 +37,16 @@
                     </Grid>
                 </controls:OptionControl>
 
+        <!-- fluxer clients predate roblox's FramerateCap setting, so this drives fluxstrap's own fps unlocker instead -->
         <controls:OptionControl 
-            Header="{x:Static resources:Strings.Menu_GPSEditor_FramerateCap_Title}" 
-            Description="{x:Static resources:Strings.Menu_GPSEditor_FramerateCap_Description}">
-            <ui:TextBox Margin="5,0,0,0" Padding="10,5,10,5" Width="200" Text="{Binding FramerateCap, Mode=TwoWay}" PreviewTextInput="ValidateUInt32" />
+            Header="FPS unlocker" 
+            Description="Raises the Fluxer client's frame rate limit while you play. Works on every Fluxer client year. Going above 240 FPS is not recommended.">
+            <ComboBox Margin="5,0,0,0" Padding="10,5,10,5" Width="200" ItemsSource="{Binding FpsCaps.Keys, Mode=OneTime}" SelectedItem="{Binding SelectedFpsCap, Mode=TwoWay}" />
         </controls:OptionControl>
 
-        <TextBlock Text="{x:Static resources:Strings.Menu_FastFlags_Presets_Categories_UserInterface}" FontSize="16" FontWeight="Medium" Margin="0,16,0,0" />
-        <controls:OptionControl Margin="0,8,0,0" Header="{x:Static resources:Strings.Menu_GBSEditor_UITransparency_Title}" Description="{x:Static resources:Strings.Menu_GBSEditor_UITransparency_Description}">
+        <!-- ui transparency, reduced motion and text size were added to roblox after the fluxer clients, so they do nothing there -->
+        <TextBlock Visibility="Collapsed" Text="{x:Static resources:Strings.Menu_FastFlags_Presets_Categories_UserInterface}" FontSize="16" FontWeight="Medium" Margin="0,16,0,0" />
+        <controls:OptionControl Visibility="Collapsed" Margin="0,8,0,0" Header="{x:Static resources:Strings.Menu_GBSEditor_UITransparency_Title}" Description="{x:Static resources:Strings.Menu_GBSEditor_UITransparency_Description}">
                     <Grid Width="256">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -57,13 +59,13 @@
                     </Grid>
                 </controls:OptionControl>
 
-                <controls:OptionControl 
+                <controls:OptionControl Visibility="Collapsed"
             Header="{x:Static resources:Strings.Menu_GBSEditor_ReducedMotion_Title}" 
             Description="{x:Static resources:Strings.Menu_GBSEditor_ReducedMotion_Description}">
                     <ui:ToggleSwitch Margin="5,0,0,0" Padding="10,5,10,5" IsChecked="{Binding ReducedMotion}" />
                 </controls:OptionControl>
 
-        <controls:OptionControl 
+        <controls:OptionControl Visibility="Collapsed"
             Header="{x:Static resources:Strings.Menu_GBSEditor_FontSize_Title}" 
             Description="{x:Static resources:Strings.Menu_GBSEditor_FontSize_Description}">
             <ComboBox Margin="5,0,0,0" Padding="10,5,10,5" Width="200" ItemsSource="{Binding FontSizes.Keys, Mode=OneTime}" Text="{Binding SelectedFontSize, Mode=TwoWay}">

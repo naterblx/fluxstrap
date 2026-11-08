@@ -10,6 +10,16 @@ namespace Bloxstrap.UI.ViewModels.Settings
             set => App.GlobalSettings.SetReadOnly(value);
         }
 
+        public IReadOnlyDictionary<string, int> FpsCaps { get; } = new[] { -1 }
+            .Concat(Fluxer.FpsUnlocker.Caps)
+            .ToDictionary(x => x switch { -1 => "Off (client default)", 0 => "Unlimited", _ => $"{x} FPS" }, x => x);
+
+        public string SelectedFpsCap
+        {
+            get => FpsCaps.FirstOrDefault(x => x.Value == App.Settings.Prop.FluxerFpsCap).Key ?? FpsCaps.Keys.First();
+            set => App.Settings.Prop.FluxerFpsCap = FpsCaps.TryGetValue(value, out int cap) ? cap : -1;
+        }
+
         public int FramerateCap
         {
             get

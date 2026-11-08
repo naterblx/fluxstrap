@@ -1,4 +1,5 @@
 ﻿using Bloxstrap.AppData;
+using Bloxstrap.Fluxer;
 using Bloxstrap.Integrations;
 
 namespace Bloxstrap
@@ -16,6 +17,8 @@ namespace Bloxstrap
         public readonly WindowManipulation? WindowManipulation;
 
         public readonly DiscordRichPresence? RichPresence;
+
+        private readonly Dictionary<int, FpsUnlocker> _fpsUnlockers = new();
 
         public Watcher()
         {
@@ -120,8 +123,19 @@ namespace Bloxstrap
             ActivityWatcher?.Start();
             WindowManipulation?.Start();
 
+            int ticks = 0;
+
             while (Utilities.GetProcessesSafe().Any(x => x.Id == _watcherData.ProcessId))
+            {
+                // the official launcher re-applies the cap every couple of seconds too, since the client can reset it
+                if (ticks++ % 2 == 0)
+                    UpdateFpsUnlockers();
+
                 await Task.Delay(1000);
+            }
+
+            foreach (var unlocker in _fpsUnlockers.Values)
+                unlocker.Close();
 
             if (_watcherData.AutoclosePids is not null)
             {
@@ -131,6 +145,59 @@ namespace Bloxstrap
 
             if (App.LaunchSettings.TestModeFlag.Active)
                 Process.Start(Paths.Process, "-settings -testmode");
+        }
+
+        /// <summary>
+        /// Keeps every fluxer client launched from our folder at the chosen fps cap, including extra instances
+        /// </summary>
+        private void UpdateFpsUnlockers()
+        {
+            const string LOG_IDENT = "Watcher::UpdateFpsUnlockers";
+
+            int cap = App.Settings.Prop.FluxerFpsCap;
+
+            if (cap < 0)
+                return;
+
+            string versionsPrefix = Paths.Versions.TrimEnd('\\') + "\\";
+
+            foreach (string name in new[] { App.FluxerPlayerAppName, App.RobloxPlayerAppName })
+            {
+                foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(name)))
+                {
+                    try
+                    {
+                        if (!_fpsUnlockers.ContainsKey(process.Id) && process.MainModule?.FileName?.StartsWith(versionsPrefix, StringComparison.OrdinalIgnoreCase) == true)
+                            _fpsUnlockers[process.Id] = new FpsUnlocker(process);
+                    }
+                    catch (Exception) { }
+                    finally
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+
+            foreach (int pid in _fpsUnlockers.Where(x => x.Value.Dead).Select(x => x.Key).ToList())
+            {
+                _fpsUnlockers[pid].Close();
+                _fpsUnlockers.Remove(pid);
+            }
+
+            foreach (var (pid, unlocker) in _fpsUnlockers)
+            {
+                bool wasReady = unlocker.Ready;
+
+                unlocker.Tick();
+
+                if (!unlocker.Ready)
+                    continue;
+
+                unlocker.SetCap(cap);
+
+                if (!wasReady)
+                    App.Logger.WriteLine(LOG_IDENT, $"Unlocked fps for PID {pid} (cap {(cap == 0 ? "unlimited" : cap)})");
+            }
         }
 
         public void Dispose()

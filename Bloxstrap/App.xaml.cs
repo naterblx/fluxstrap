@@ -22,7 +22,7 @@ namespace Bloxstrap
 
         // the GitHub repository ("owner/name") that FluxStrap releases are published to
         // auto-updating and the issue/download links stay off until this is set
-        public const string ProjectRepository = "";
+        public const string ProjectRepository = "naterblx/fluxstrap";
         public const string ProjectDownloadLink = Fluxer.FluxerSite.DownloadsUrl;
         public const string ProjectHelpLink = Fluxer.FluxerSite.Url;
         public const string ProjectSupportLink = Fluxer.FluxerSite.Url;

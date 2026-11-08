@@ -1,4 +1,4 @@
-
+﻿
 ﻿using Bloxstrap.Enums.FlagPresets;
 using Bloxstrap.Enums.GBSPresets;
 using Microsoft.VisualBasic;
@@ -125,6 +125,9 @@ namespace Bloxstrap
 
             try
             {
+                // people who only play fluxer may not have this folder yet
+                Directory.CreateDirectory(Path.GetDirectoryName(FileLocation)!);
+
                 var uri = new Uri("pack://application:,,,/Resources/GlobalBasicSettings_Template.xml");
                 var resourceInfo = Application.GetResourceStream(uri);
 

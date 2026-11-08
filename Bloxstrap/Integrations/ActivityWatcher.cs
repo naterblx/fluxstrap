@@ -22,7 +22,8 @@
         private const string GameJoiningEntryPattern         = @"! Joining game '([0-9a-f\-]{36})' place ([0-9]+) at ([0-9\.]+)";
         private const string GameJoinReferralPattern         = @"referral_page:([^,]+)";
         private const string GameTeleportJoinTypePattern     = @"JoinTypeId""%3a(\d+)%2c";
-        private const string GameJoiningUniversePattern      = @"universeid:([0-9]+).*userid:([0-9]+)";
+        private const string GameJoiningUniverseIdPattern    = @"universeid:([0-9]+)";
+        private const string GameJoiningUserIdPattern        = @"userid:([0-9]+)";
         private const string GameJoiningUDMUXPattern         = @"UDMUX Address = ([0-9\.]+), Port = [0-9]+ \| RCC Server Address = ([0-9\.]+), Port = [0-9]+";
         private const string GameJoinedEntryPattern          = @"serverId: ([0-9\.]+)\|[0-9]+";
         private const string GameMessageEntryPattern         = @"\[BloxstrapRPC\] (.*)";
@@ -146,6 +147,9 @@
             if (message.StartsWith("serverId:") || message.StartsWith("Client:Disconnect"))
                 return "[FLog::Network] " + message;
 
+            if (message.StartsWith("Report game_join_loadtime:"))
+                return "[FLog::GameJoinLoadTime] " + message;
+
             return message;
         }
 
@@ -229,17 +233,19 @@
 
                 if (logMessage.StartsWith(GameJoiningUniverseEntry))
                 {
-                    var match = Regex.Match(logMessage, GameJoiningUniversePattern);
+                    // older clients put userid before universeid, so read them separately
+                    var universeMatch = Regex.Match(logMessage, GameJoiningUniverseIdPattern);
+                    var userMatch = Regex.Match(logMessage, GameJoiningUserIdPattern);
 
-                    if (match.Groups.Count != 3)
+                    if (!universeMatch.Success || !userMatch.Success)
                     {
                         App.Logger.WriteLine(LOG_IDENT, "Failed to assert format for game join universe entry");
                         App.Logger.WriteLine(LOG_IDENT, logMessage);
                         return;
                     }
 
-                    Data.UniverseId = Int64.Parse(match.Groups[1].Value);
-                    Data.UserId = Int64.Parse(match.Groups[2].Value);
+                    Data.UniverseId = Int64.Parse(universeMatch.Groups[1].Value);
+                    Data.UserId = Int64.Parse(userMatch.Groups[1].Value);
 
                     var loadTimeMatch = Regex.Match(logMessage, GameJoinReferralPattern);
 

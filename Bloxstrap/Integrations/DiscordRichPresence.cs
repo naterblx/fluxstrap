@@ -43,9 +43,17 @@ namespace Bloxstrap.Integrations
             _rpcClient.OnConnectionEstablished += (_, e) =>
                 App.Logger.WriteLine(LOG_IDENT, "Established connection with Discord RPC");
 
-            //spams log as it tries to connect every ~15 sec when discord is closed so not now
-            //_rpcClient.OnConnectionFailed += (_, e) =>
-            //    App.Logger.WriteLine(LOG_IDENT, "Failed to establish connection with Discord RPC");
+            // it retries every ~15 seconds while discord is closed, so only say it once
+            bool connectionFailureLogged = false;
+
+            _rpcClient.OnConnectionFailed += (_, e) =>
+            {
+                if (connectionFailureLogged)
+                    return;
+
+                connectionFailureLogged = true;
+                App.Logger.WriteLine(LOG_IDENT, "Could not reach Discord - the presence only shows while the Discord desktop app is open and signed in");
+            };
 
             _rpcClient.OnClose += (_, e) =>
                 App.Logger.WriteLine(LOG_IDENT, $"Lost connection to Discord RPC - {e.Reason} ({e.Code})");
@@ -378,7 +386,8 @@ namespace Bloxstrap.Integrations
 
             icon = universeDetails.Thumbnail.ImageUrl!;
 
-            if (App.Settings.Prop.ShowAccountOnRichPresence)
+            // older fluxer clients don't always log who's playing
+            if (App.Settings.Prop.ShowAccountOnRichPresence && activity.UserId != 0)
             {
                 var userDetails = await UserDetails.Fetch(activity.UserId);
 
