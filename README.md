@@ -5,6 +5,10 @@
 
 </div>
 
+## NOTE
+
+Claude only contributed to pushing to github everything here was only 10% ai generated rest is fishstrap's code modified by me
+
 FluxStrap is a custom bootstrapper for the [Fluxer](https://fluxr.lol) revival.
 It's a fork of [Fishstrap][fishstrap], which is itself based on
 [Bloxstrap][bloxstrap], so you get their settings menu, Fast Flags, mods,
