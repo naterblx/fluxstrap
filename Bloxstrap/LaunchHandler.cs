@@ -51,6 +51,9 @@ namespace Bloxstrap
             }
             else if (App.LaunchSettings.MenuFlag.Active)
             {
+                if (TryUpdateBeforeOpening())
+                    return;
+
                 App.Logger.WriteLine(LOG_IDENT, "Opening settings");
                 LaunchSettings();
             }
@@ -76,6 +79,9 @@ namespace Bloxstrap
             }
             else if (!App.LaunchSettings.QuietFlag.Active)
             {
+                if (TryUpdateBeforeOpening())
+                    return;
+
                 App.Logger.WriteLine(LOG_IDENT, "Opening menu");
                 LaunchMenu();
             }
@@ -84,6 +90,102 @@ namespace Bloxstrap
                 App.Logger.WriteLine(LOG_IDENT, "Closing - quiet flag active");
                 App.Terminate();
             }
+        }
+
+        /// <summary>
+        /// The bootstrapper only checks for updates when launching a game, so opening the menu or settings
+        /// checks too. Returns true if an update was started, in which case this instance should close.
+        /// </summary>
+        private static bool TryUpdateBeforeOpening()
+        {
+            const string LOG_IDENT = "LaunchHandler::TryUpdateBeforeOpening";
+
+#if DEBUG || QA_BUILD
+            return false;
+#else
+            if (!App.Settings.Prop.CheckForUpdates || !App.HasProjectRepository || App.LaunchSettings.UpgradeFlag.Active)
+                return false;
+
+            // another instance is likely updating or running in the background
+            if (Process.GetProcessesByName(App.ProjectName).Length > 1)
+                return false;
+
+            // don't hold the menu up for long when github is slow or the pc is offline
+            var releaseTask = Task.Run(App.GetLatestRelease);
+
+            if (!releaseTask.Wait(TimeSpan.FromSeconds(4)) || releaseTask.Result is not GithubRelease release)
+            {
+                App.Logger.WriteLine(LOG_IDENT, "Could not get the latest release in time");
+                return false;
+            }
+
+            var comparison = Utilities.CompareVersions(App.Version, release.TagName);
+
+            if (App.IsProductionBuild && comparison == VersionComparison.Equal || comparison == VersionComparison.GreaterThan)
+            {
+                App.Logger.WriteLine(LOG_IDENT, $"Up to date ({App.Version}, latest is {release.TagName})");
+                return false;
+            }
+
+            if (release.Assets is null || !release.Assets.Any())
+                return false;
+
+            App.Logger.WriteLine(LOG_IDENT, $"{release.TagName} is available (running {App.Version})");
+
+            var answer = Frontend.ShowMessageBox(
+                $"FluxStrap {release.TagName} is available (you have {App.Version}).\n\nWould you like to update now?",
+                MessageBoxImage.Question,
+                MessageBoxButton.YesNo
+            );
+
+            if (answer != MessageBoxResult.Yes)
+                return false;
+
+            try
+            {
+                var asset = release.Assets[0];
+                string downloadLocation = Path.Combine(Paths.TempUpdates, asset.Name);
+
+                Directory.CreateDirectory(Paths.TempUpdates);
+
+                App.Logger.WriteLine(LOG_IDENT, $"Downloading {release.TagName}...");
+
+                Task.Run(async () =>
+                {
+                    using var response = await App.HttpClient.GetAsync(asset.BrowserDownloadUrl);
+                    response.EnsureSuccessStatusCode();
+
+                    await using var fileStream = new FileStream(downloadLocation, FileMode.Create, FileAccess.Write);
+                    await response.Content.CopyToAsync(fileStream);
+                }).GetAwaiter().GetResult();
+
+                // the new version installs itself over this one, then carries on with the same arguments
+                var startInfo = new ProcessStartInfo(downloadLocation);
+                startInfo.ArgumentList.Add("-upgrade");
+
+                foreach (string arg in App.LaunchSettings.Args)
+                    startInfo.ArgumentList.Add(arg);
+
+                App.Settings.Save();
+
+                new InterProcessLock("AutoUpdater");
+
+                Process.Start(startInfo);
+                App.Terminate();
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                App.Logger.WriteLine(LOG_IDENT, "Could not download the update");
+                App.Logger.WriteException(LOG_IDENT, ex);
+
+                Frontend.ShowMessageBox(string.Format(Strings.Bootstrapper_AutoUpdateFailed, release.TagName), MessageBoxImage.Information);
+                Utilities.ShellExecute($"https://github.com/{App.ProjectRepository}/releases/latest");
+
+                return false;
+            }
+#endif
         }
 
         public static void LaunchInstaller()
