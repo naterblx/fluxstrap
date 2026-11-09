@@ -44,6 +44,9 @@ namespace Bloxstrap.UI.Elements.ContextMenu
             if (_watcher.RichPresence is not null)
                 RichPresenceMenuItem.Visibility = Visibility.Visible;
 
+            if (App.IsDevBuild)
+                OnlineMenuItem.Visibility = Visibility.Visible;
+
             VersionTextBlock.Text = $"{App.ProjectName} v{App.Version}";
         }
 
@@ -107,6 +110,16 @@ namespace Bloxstrap.UI.Elements.ContextMenu
         private void InviteDeeplinkMenuItem_Click(object sender, RoutedEventArgs e) => Clipboard.SetDataObject(_activityWatcher?.Data.GetInviteDeeplink());
 
         private void ServerDetailsMenuItem_Click(object sender, RoutedEventArgs e) => ShowServerInformationWindow();
+
+        private void OnlineMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+#if DEV_BUILD
+            var data = _activityWatcher?.Data;
+            string? room = data is not null && data.PlaceId != 0 && !String.IsNullOrEmpty(data.JobId) ? data.JobId : null;
+
+            new Online.OnlineWindow(room).Show();
+#endif
+        }
 
         private void LogTracerMenuItem_Click(object sender, RoutedEventArgs e)
         {

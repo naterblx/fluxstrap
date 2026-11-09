@@ -19,6 +19,8 @@
 //   speaker -> server text   {"t":"talk","on":<bool>}                 -> relayed as {"t":"talk","id":<n>,"on":<bool>}
 //   speaker -> server binary one Opus frame (48 kHz mono, 20 ms)     -> relayed as [uint32 LE speaker id][float32 LE x, y, z][frame]
 //
+// GET /stats with "Authorization: Bearer <dev key>" lists everyone connected, grouped by game server.
+//
 // Version 1 clients (FluxStrap 1.2.x) never report a position, so they get no audio.
 
 "use strict";
@@ -181,7 +183,38 @@ function onPosition(client, message) {
     if ([x, y, z].every(v => typeof v === "number" && Number.isFinite(v) && Math.abs(v) < 1e6)) client.pos = { x, y, z };
 }
 
+// who's in game with FluxStrap right now, grouped by server. dev keys only, since it lists user ids
+function stats() {
+    const servers = [];
+    let online = 0;
+
+    for (const [room, members] of rooms) {
+        const slash = room.indexOf("/");
+        const users = [...members].map(x => ({ userId: x.user, speaker: x.speaker, name: x.name, talking: x.talking, version: x.version }));
+
+        online += users.length;
+        servers.push({ placeId: Number(room.slice(0, slash)), jobId: room.slice(slash + 1), users });
+    }
+
+    servers.sort((a, b) => b.users.length - a.users.length);
+    return { online, servers };
+}
+
 const server = http.createServer((request, response) => {
+    if (request.url === "/stats") {
+        const auth = request.headers.authorization || "";
+
+        if (lookupKey(auth.startsWith("Bearer ") ? auth.slice(7).trim() : "") === null) {
+            response.writeHead(401, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ error: "a dev key is needed" }));
+            return;
+        }
+
+        response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        response.end(JSON.stringify(stats()));
+        return;
+    }
+
     if (request.url === "/healthz") {
         response.writeHead(200, { "Content-Type": "text/plain" });
         response.end("ok");
@@ -200,7 +233,7 @@ wss.on("connection", socket => {
         return;
     }
 
-    const client = { id: nextId++, socket, room: null, speaker: false, name: null, user: 0, alive: true, windowStart: 0, frames: 0, version: 1, pos: null, posWindowStart: 0, positions: 0 };
+    const client = { id: nextId++, socket, room: null, speaker: false, name: null, user: 0, alive: true, windowStart: 0, frames: 0, version: 1, pos: null, posWindowStart: 0, positions: 0, talking: false };
     const helloTimer = setTimeout(() => { if (!client.room) socket.close(4002, "no hello"); }, HELLO_TIMEOUT_MS);
 
     socket.on("pong", () => { client.alive = true; });
@@ -225,7 +258,8 @@ wss.on("connection", socket => {
         } else if (message.t === "pos" && client.room) {
             onPosition(client, message);
         } else if (message.t === "talk" && client.room && client.speaker) {
-            const relay = JSON.stringify({ t: "talk", id: client.id, on: message.on === true });
+            client.talking = message.on === true;
+            const relay = JSON.stringify({ t: "talk", id: client.id, on: client.talking });
 
             for (const member of rooms.get(client.room) || []) {
                 if (member !== client && member.socket.readyState === member.socket.OPEN) member.socket.send(relay);

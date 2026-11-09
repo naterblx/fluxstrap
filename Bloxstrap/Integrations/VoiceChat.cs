@@ -34,6 +34,47 @@ namespace Bloxstrap.Integrations
             { "Mouse button 5", 0x06 }
         };
 
+        /// <summary>
+        /// The microphone being used, for showing on the mute button
+        /// </summary>
+        public string? MicrophoneName { get; private set; }
+
+        public const string DefaultMicrophone = "Windows default";
+
+        /// <summary>
+        /// The wave-in device to record from. Microphones are saved by name, since their numbers shift when
+        /// devices are plugged in or out. Settings from before that saved a number, which is used as a fallback.
+        /// </summary>
+        public static (int Device, string Name) ResolveMicrophone()
+        {
+            var names = GetMicrophoneNames();
+            string saved = App.Settings.Prop.VoiceChatMicrophoneName;
+
+            if (!String.IsNullOrEmpty(saved))
+            {
+                int index = names.IndexOf(saved);
+
+                if (index >= 0)
+                    return (index, saved);
+
+                App.Logger.WriteLine("VoiceChat::ResolveMicrophone", $"{saved} isn't plugged in, using the Windows default");
+                return (-1, DefaultMicrophone);
+            }
+
+            int number = App.Settings.Prop.VoiceChatMicrophone;
+            return number >= 0 && number < names.Count ? (number, names[number]) : (-1, DefaultMicrophone);
+        }
+
+        public static List<string> GetMicrophoneNames()
+        {
+            var names = new List<string>();
+
+            for (int i = 0; i < WaveInEvent.DeviceCount; i++)
+                names.Add(WaveInEvent.GetCapabilities(i).ProductName);
+
+            return names;
+        }
+
         private const int SampleRate = 48000;
         private const int FrameSamples = SampleRate / 50; // 20 ms, what the server expects per message
         private const int MaxPacketBytes = 1275;
@@ -83,6 +124,9 @@ namespace Bloxstrap.Integrations
         {
             public string Name = "Someone";
             public bool Talking;
+            public Vector3 Position;
+            public float Level;
+            public long LastAudio;
             public readonly IOpusDecoder Decoder = OpusCodecFactory.CreateDecoder(SampleRate, 1);
             public readonly BufferedWaveProvider Buffer = new(new WaveFormat(SampleRate, 16, 1))
             {
@@ -90,6 +134,56 @@ namespace Bloxstrap.Integrations
                 DiscardOnBufferOverflow = true
             };
             public SpatialSampleProvider? Input;
+        }
+
+        public readonly record struct TalkingSpeaker(string Name, Vector3 Position, float Level);
+
+        /// <summary>
+        /// Who's audibly talking right now, where they are and how loud they sound to us (0 to 1)
+        /// </summary>
+        public List<TalkingSpeaker> GetTalkingSpeakers()
+        {
+            long now = Environment.TickCount64;
+
+            lock (_speakers)
+            {
+                return _speakers.Values
+                    .Where(x => now - x.LastAudio < 300 && x.Input is not null && x.Input.TargetGain > 0)
+                    .Select(x => new TalkingSpeaker(x.Name, x.Position, x.Level))
+                    .ToList();
+            }
+        }
+
+        /// <summary>
+        /// Our camera, for putting things over the game where other players are
+        /// </summary>
+        public CameraReader.CameraState? Camera
+        {
+            get
+            {
+                lock (_selfLock)
+                    return _self;
+            }
+        }
+
+        /// <summary>
+        /// How loud we are while we're talking (0 to 1)
+        /// </summary>
+        public float OwnLevel { get; private set; }
+
+        // speech sits around 0.02 to 0.2 rms, the square root spreads that across most of the range
+        private static float GetLevel(ReadOnlySpan<short> samples)
+        {
+            if (samples.IsEmpty)
+                return 0;
+
+            double sum = 0;
+
+            foreach (short sample in samples)
+                sum += (double)sample * sample;
+
+            double rms = Math.Sqrt(sum / samples.Length) / short.MaxValue;
+            return (float)Math.Clamp(Math.Sqrt(rms) * 2.2, 0, 1);
         }
 
         public VoiceChat(ActivityWatcher activityWatcher, int gamePid)
@@ -107,6 +201,19 @@ namespace Bloxstrap.Integrations
         }
 
         private static string ServerUrl => String.IsNullOrWhiteSpace(App.Settings.Prop.VoiceChatServer) ? DefaultServer : App.Settings.Prop.VoiceChatServer;
+
+        /// <summary>
+        /// Who's online, from the same server (wss://host/voice -> https://host/stats)
+        /// </summary>
+        public static Uri StatsUrl
+        {
+            get
+            {
+                var builder = new UriBuilder(ServerUrl) { Path = "/stats" };
+                builder.Scheme = builder.Scheme == "ws" ? "http" : "https";
+                return builder.Uri;
+            }
+        }
 
         private void Join()
         {
@@ -374,8 +481,10 @@ namespace Bloxstrap.Integrations
                     lock (_selfLock)
                         _self = state;
 
-                    // only when it moves, plus now and then so the server never forgets us
-                    if (Vector3.DistanceSquared(state.Focus, last) > 0.25f || DateTime.Now - lastSent > TimeSpan.FromSeconds(2))
+                    // only when it moves (up to 10 times a second), plus now and then so the server never forgets us
+                    var sinceSent = DateTime.Now - lastSent;
+
+                    if (Vector3.DistanceSquared(state.Focus, last) > 0.25f && sinceSent > TimeSpan.FromMilliseconds(100) || sinceSent > TimeSpan.FromSeconds(2))
                     {
                         Queue(WebSocketMessageType.Text, JsonSerializer.SerializeToUtf8Bytes(new { t = "pos", x = state.Focus.X, y = state.Focus.Y, z = state.Focus.Z }));
                         last = state.Focus;
@@ -385,7 +494,8 @@ namespace Bloxstrap.Integrations
 
                 try
                 {
-                    await Task.Delay(200, token);
+                    // read often so things drawn over the game keep up with the camera
+                    await Task.Delay(33, token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -407,9 +517,10 @@ namespace Bloxstrap.Integrations
 
         private void StopPlayback()
         {
-            _output?.Stop();
-            _output?.Dispose();
-            _output = null;
+            var output = Interlocked.Exchange(ref _output, null);
+
+            output?.Stop();
+            output?.Dispose();
         }
 
         // [speaker id][speaker position x, y, z][opus frame]
@@ -451,6 +562,10 @@ namespace Bloxstrap.Integrations
 
                 if (samples <= 0)
                     return;
+
+                speaker.Position = position;
+                speaker.Level = GetLevel(pcm.AsSpan(0, samples)) * (speaker.Input?.TargetGain ?? 1);
+                speaker.LastAudio = Environment.TickCount64;
 
                 var bytes = new byte[samples * 2];
                 Buffer.BlockCopy(pcm, 0, bytes, 0, bytes.Length);
@@ -505,12 +620,13 @@ namespace Bloxstrap.Integrations
 
             try
             {
-                _encoder = OpusCodecFactory.CreateEncoder(SampleRate, 1, OpusApplication.OPUS_APPLICATION_VOIP);
-                _encoder.Bitrate = 32000;
+                _encoder = CreateEncoder();
+
+                var (device, name) = ResolveMicrophone();
 
                 _input = new WaveInEvent
                 {
-                    DeviceNumber = App.Settings.Prop.VoiceChatMicrophone,
+                    DeviceNumber = device,
                     WaveFormat = new WaveFormat(SampleRate, 16, 1),
                     BufferMilliseconds = 20
                 };
@@ -518,7 +634,8 @@ namespace Bloxstrap.Integrations
                 _input.DataAvailable += OnMicrophoneData;
                 _input.StartRecording();
 
-                App.Logger.WriteLine(LOG_IDENT, App.Settings.Prop.VoiceChatOpenMic ? "Microphone on (open mic)" : "Microphone on (push to talk)");
+                MicrophoneName = name;
+                App.Logger.WriteLine(LOG_IDENT, $"Microphone on: {name} ({(App.Settings.Prop.VoiceChatOpenMic ? "open mic" : "push to talk")})");
             }
             catch (Exception ex)
             {
@@ -528,24 +645,34 @@ namespace Bloxstrap.Integrations
             }
         }
 
+        // CELT only (restricted low delay): Concentus' SILK speech encoder can throw on some audio
+        private static IOpusEncoder CreateEncoder()
+        {
+            var encoder = OpusCodecFactory.CreateEncoder(SampleRate, 1, OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY);
+            encoder.Bitrate = 40000;
+            return encoder;
+        }
+
         private void StopCapture()
         {
-            if (_input is null)
+            // leaving a game and closing it can both get here at once
+            var input = Interlocked.Exchange(ref _input, null);
+
+            if (input is null)
                 return;
 
-            _input.DataAvailable -= OnMicrophoneData;
+            input.DataAvailable -= OnMicrophoneData;
 
             try
             {
-                _input.StopRecording();
+                input.StopRecording();
             }
             catch (Exception)
             {
                 // already stopped
             }
 
-            _input.Dispose();
-            _input = null;
+            input.Dispose();
             Transmitting = false;
             _frameFill = 0;
         }
@@ -566,7 +693,10 @@ namespace Bloxstrap.Integrations
 
         private void OnFrame()
         {
-            bool transmit = ShouldTransmit();
+            float level = GetLevel(_frame);
+            bool transmit = ShouldTransmit(level);
+
+            OwnLevel = transmit ? level : 0;
 
             if (transmit != Transmitting)
             {
@@ -578,13 +708,25 @@ namespace Bloxstrap.Integrations
                 return;
 
             var packet = new byte[MaxPacketBytes];
-            int length = _encoder.Encode(_frame, FrameSamples, packet, packet.Length);
+            int length;
+
+            try
+            {
+                length = _encoder.Encode(_frame, FrameSamples, packet, packet.Length);
+            }
+            catch (Exception ex)
+            {
+                // this runs on the recording thread, where an exception would stop the microphone for good
+                App.Logger.WriteLine("VoiceChat::OnFrame", $"Couldn't encode a frame ({ex.GetType().Name}), starting the encoder over");
+                _encoder = CreateEncoder();
+                return;
+            }
 
             if (length > 0)
                 Queue(WebSocketMessageType.Binary, packet[..length]);
         }
 
-        private bool ShouldTransmit()
+        private bool ShouldTransmit(float level)
         {
             if (Muted)
                 return false;
@@ -592,15 +734,8 @@ namespace Bloxstrap.Integrations
             if (!App.Settings.Prop.VoiceChatOpenMic)
                 return (GetAsyncKeyState(App.Settings.Prop.VoiceChatPushToTalkKey) & 0x8000) != 0 && IsClientFocused();
 
-            // open mic: a simple noise gate that stays open for 300 ms after you stop talking
-            double sum = 0;
-
-            foreach (short sample in _frame)
-                sum += (double)sample * sample;
-
-            double rms = Math.Sqrt(sum / FrameSamples) / short.MaxValue;
-
-            if (rms > 0.015)
+            // open mic: a simple noise gate that stays open for 300 ms after you stop talking (0.27 is an rms of about 0.015)
+            if (level > 0.27f)
                 _gateHold = 15;
             else if (_gateHold > 0)
                 _gateHold--;

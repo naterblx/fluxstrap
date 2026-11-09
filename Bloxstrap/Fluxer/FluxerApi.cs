@@ -11,7 +11,103 @@ namespace Bloxstrap.Fluxer
             public long UniverseId { get; set; }
         }
 
+        private class PlaceName
+        {
+            [JsonPropertyName("placeId")]
+            public long PlaceId { get; set; }
+
+            [JsonPropertyName("name")]
+            public string Name { get; set; } = "";
+        }
+
+        private class UserList
+        {
+            [JsonPropertyName("data")]
+            public List<UserEntry> Data { get; set; } = new();
+        }
+
+        private class UserEntry
+        {
+            [JsonPropertyName("id")]
+            public long Id { get; set; }
+
+            [JsonPropertyName("name")]
+            public string Name { get; set; } = "";
+        }
+
         private static readonly Dictionary<long, long> UniverseCache = new();
+        private static readonly Dictionary<long, string> UsernameCache = new();
+        private static readonly Dictionary<long, string> PlaceNameCache = new();
+
+        /// <summary>
+        /// Usernames for a batch of user ids. Ones that couldn't be looked up are left out.
+        /// </summary>
+        public static async Task<Dictionary<long, string>> GetUsernames(IEnumerable<long> userIds)
+        {
+            var wanted = userIds.Where(x => x > 0).Distinct().ToList();
+
+            lock (UsernameCache)
+                wanted = wanted.Where(x => !UsernameCache.ContainsKey(x)).ToList();
+
+            if (wanted.Any())
+            {
+                try
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Post, UrlBuilder.BuildApiUrl("users", "v1/users"))
+                    {
+                        Content = new StringContent(JsonSerializer.Serialize(new { userIds = wanted, excludeBannedUsers = false }), Encoding.UTF8, "application/json")
+                    };
+
+                    var users = await Http.SendJson<UserList>(request);
+
+                    lock (UsernameCache)
+                    {
+                        foreach (var user in users?.Data ?? new())
+                            UsernameCache[user.Id] = user.Name;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    App.Logger.WriteException("FluxerApi::GetUsernames", ex);
+                }
+            }
+
+            lock (UsernameCache)
+                return userIds.Where(UsernameCache.ContainsKey).Distinct().ToDictionary(x => x, x => UsernameCache[x]);
+        }
+
+        /// <summary>
+        /// Game names for a batch of place ids. Ones that couldn't be looked up are left out.
+        /// </summary>
+        public static async Task<Dictionary<long, string>> GetPlaceNames(IEnumerable<long> placeIds)
+        {
+            var wanted = placeIds.Where(x => x > 0).Distinct().ToList();
+
+            lock (PlaceNameCache)
+                wanted = wanted.Where(x => !PlaceNameCache.ContainsKey(x)).ToList();
+
+            if (wanted.Any())
+            {
+                try
+                {
+                    var url = UrlBuilder.BuildApiUrl("games", $"v1/games/multiget-place-details?placeIds={String.Join(",", wanted)}");
+                    var places = await Http.GetJson<List<PlaceName>>(url);
+
+                    lock (PlaceNameCache)
+                    {
+                        foreach (var place in places ?? new())
+                            PlaceNameCache[place.PlaceId] = place.Name;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    App.Logger.WriteException("FluxerApi::GetPlaceNames", ex);
+                }
+            }
+
+            lock (PlaceNameCache)
+                return placeIds.Where(PlaceNameCache.ContainsKey).Distinct().ToDictionary(x => x, x => PlaceNameCache[x]);
+        }
 
         /// <summary>
         /// Looks up which universe a place belongs to. Returns 0 if it couldn't be found.

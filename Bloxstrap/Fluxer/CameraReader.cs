@@ -10,7 +10,21 @@ namespace Bloxstrap.Fluxer
     /// </summary>
     public class CameraReader : IDisposable
     {
-        public readonly record struct CameraState(Vector3 Position, Vector3 Right, Vector3 Focus);
+        /// <param name="Position">where the camera is</param>
+        /// <param name="Right">the camera's right, up and backward directions (it looks along -Back)</param>
+        /// <param name="FieldOfView">vertical, in radians</param>
+        /// <param name="Focus">around your character</param>
+        public readonly record struct CameraState(Vector3 Position, Vector3 Right, Vector3 Up, Vector3 Back, float FieldOfView, Vector3 Focus);
+
+        private static readonly float DefaultFieldOfView = 70 * MathF.PI / 180;
+
+        // where FieldOfView sits for each client's CFrame offset, if it isn't at its default when we find the camera
+        private static readonly Dictionary<int, int> KnownFieldOfViewOffsets = new()
+        {
+            { 0x64, 0x1B0 }, // 2019
+            { 0x60, 0x1B0 }, // 2020
+            { 0x6C, 0x1BC }  // 2021
+        };
 
         // instances keep a pointer to their name at 0x28 (0x2c on 2019); children and parent follow it
         private static readonly int[] NameOffsets = { 0x28, 0x2C };
@@ -31,6 +45,7 @@ namespace Bloxstrap.Fluxer
 
         private uint _camera;
         private int _cframeOffset;
+        private int _fieldOfViewOffset;
         private DateTime _nextSearch = DateTime.MinValue;
 
         public bool Supported { get; }
@@ -108,10 +123,24 @@ namespace Bloxstrap.Fluxer
 
             var floats = MemoryMarshal.Cast<byte, float>(cframes);
 
-            // CFrame: row major rotation, then position. the right vector is the first column
+            float fieldOfView = DefaultFieldOfView;
+            var fovBytes = new byte[4];
+
+            if (_fieldOfViewOffset != 0 && Read(_camera + (uint)_fieldOfViewOffset, fovBytes))
+            {
+                float value = BitConverter.ToSingle(fovBytes, 0);
+
+                if (value > 0.0175f && value < 2.1f)
+                    fieldOfView = value;
+            }
+
+            // CFrame: row major rotation, then position. the columns are right, up and back
             state = new CameraState(
                 new Vector3(floats[9], floats[10], floats[11]),
                 new Vector3(floats[0], floats[3], floats[6]),
+                new Vector3(floats[1], floats[4], floats[7]),
+                new Vector3(floats[2], floats[5], floats[8]),
+                fieldOfView,
                 new Vector3(floats[21], floats[22], floats[23]));
 
             return true;
@@ -190,6 +219,7 @@ namespace Bloxstrap.Fluxer
 
                         _camera = child;
                         _cframeOffset = cframeOffset;
+                        _fieldOfViewOffset = FindFieldOfViewOffset(child, cframeOffset);
 
                         App.Logger.WriteLine(LOG_IDENT, $"Found the camera (name at 0x{nameOffset:X}, CFrame at 0x{cframeOffset:X})");
                         return true;
@@ -198,6 +228,23 @@ namespace Bloxstrap.Fluxer
             }
 
             return false;
+        }
+
+        // FieldOfView is kept in radians a bit after the CFrame, and is almost always still 70 when we find the camera
+        private int FindFieldOfViewOffset(uint camera, int cframeOffset)
+        {
+            var data = new byte[0x240];
+
+            if (Read(camera, data))
+            {
+                for (int offset = 0x180; offset + 4 <= data.Length; offset += 4)
+                {
+                    if (Math.Abs(BitConverter.ToSingle(data, offset) - DefaultFieldOfView) < 1e-5f)
+                        return offset;
+                }
+            }
+
+            return KnownFieldOfViewOffsets.GetValueOrDefault(cframeOffset);
         }
 
         // the CFrame is the first rotation in the camera, with Focus right after it

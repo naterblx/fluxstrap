@@ -78,6 +78,7 @@ namespace Bloxstrap.Models.Persistable
         public bool VoiceChatOpenMic { get; set; } = true; // like roblox, with the mute button
         public int VoiceChatPushToTalkKey { get; set; } = 0x56; // V
         public int VoiceChatMicrophone { get; set; } = -1; // -1 = windows default
+        public string VoiceChatMicrophoneName { get; set; } = ""; // empty = windows default, takes over from VoiceChatMicrophone
 
         // mod preset configuration
         public bool UseDisableAppPatch { get; set; } = false;

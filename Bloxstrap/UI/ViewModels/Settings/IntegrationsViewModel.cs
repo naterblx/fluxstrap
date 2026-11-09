@@ -82,26 +82,34 @@ namespace Bloxstrap.UI.ViewModels.Settings
             set => App.Settings.Prop.VoiceChatPushToTalkKey = VoiceChat.PushToTalkKeys[value];
         }
 
-        // index 0 is the windows default (device -1), the rest are wave-in devices in order
+        // index 0 is the windows default, the rest are wave-in devices in order
         public List<string> Microphones { get; } = GetMicrophones();
 
+        // saved by name, see VoiceChat.ResolveMicrophone
         public int SelectedMicrophoneIndex
         {
-            get => Math.Clamp(App.Settings.Prop.VoiceChatMicrophone + 1, 0, Microphones.Count - 1);
-            set => App.Settings.Prop.VoiceChatMicrophone = value - 1;
+            get
+            {
+                string name = VoiceChat.ResolveMicrophone().Name;
+                return Math.Max(0, Microphones.IndexOf(name));
+            }
+            set
+            {
+                App.Settings.Prop.VoiceChatMicrophoneName = value <= 0 ? "" : Microphones[value];
+                App.Settings.Prop.VoiceChatMicrophone = -1;
+            }
         }
 
         private static List<string> GetMicrophones()
         {
-            var names = new List<string> { "Windows default" };
+            var names = new List<string> { VoiceChat.DefaultMicrophone };
 
             if (!App.IsDevBuild)
                 return names;
 
             try
             {
-                for (int i = 0; i < NAudio.Wave.WaveInEvent.DeviceCount; i++)
-                    names.Add(NAudio.Wave.WaveInEvent.GetCapabilities(i).ProductName);
+                names.AddRange(VoiceChat.GetMicrophoneNames());
             }
             catch (Exception ex)
             {
@@ -110,6 +118,13 @@ namespace Bloxstrap.UI.ViewModels.Settings
 
             return names;
         }
+
+        public ICommand OpenOnlineCommand => new RelayCommand(() =>
+        {
+#if DEV_BUILD
+            new UI.Elements.Online.OnlineWindow(null).Show();
+#endif
+        });
 
         public ICommand AddIntegrationCommand => new RelayCommand(AddIntegration);
 

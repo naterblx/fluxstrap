@@ -53,7 +53,11 @@ Roblox/Bloxstrap/Fishstrap install keeps working next to it.
 - Proximity voice chat between FluxStrap users, like Roblox's: voices get
   quieter with distance, pan left and right, and go silent past 80 studs.
   Everyone can listen; only the dev build can talk, with a mute button over
-  the game. Works on the 2019, 2020 and 2021 clients.
+  the game. A bubble over whoever's talking shows how loud they are. Works on
+  the 2019, 2020 and 2021 clients.
+- In the dev build, a "Who's online" window: how many people are in game with
+  FluxStrap, which servers they're in and their usernames. It needs a dev key,
+  since it lists who's where.
 
 ## Public and dev builds
 
@@ -100,6 +104,9 @@ keys that aren't signed.
 
 Free services go to sleep after about 15 minutes without anyone connected. The
 first person to join voice after that waits up to a minute for it to wake up.
+
+`GET /stats` with `Authorization: Bearer <dev key>` lists everyone connected,
+grouped by game server. The dev build's "Who's online" window reads it.
 
 `npm test` inside `VoiceServer` checks the relay rules.
 

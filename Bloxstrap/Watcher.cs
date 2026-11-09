@@ -20,6 +20,8 @@ namespace Bloxstrap
 
         public readonly VoiceChat? VoiceChat;
 
+        private readonly UI.Elements.Overlay.VoiceIndicators? _voiceIndicators;
+
 #if DEV_BUILD
         private readonly UI.Elements.Overlay.VoiceMuteButton? _muteButton;
 #endif
@@ -90,6 +92,7 @@ namespace Bloxstrap
                 if (App.Settings.Prop.VoiceChatEnabled)
                 {
                     VoiceChat = new(ActivityWatcher, _watcherData.ProcessId);
+                    _voiceIndicators = new(VoiceChat, _watcherData.ProcessId);
 #if DEV_BUILD
                     _muteButton = new(VoiceChat, _watcherData.ProcessId);
 #endif
@@ -221,6 +224,7 @@ namespace Bloxstrap
             _notifyIcon?.Dispose();
             RichPresence?.Dispose();
             VoiceChat?.Dispose();
+            _voiceIndicators?.Dispatcher.Invoke(_voiceIndicators.Close);
 #if DEV_BUILD
             _muteButton?.Dispatcher.Invoke(_muteButton.Close);
 #endif

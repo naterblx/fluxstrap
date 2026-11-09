@@ -115,6 +115,22 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
         check("other rooms hear nothing", otherRoom.audio.length === 0);
         check("talk indicator is relayed", listener.messages.some(x => x.t === "talk" && x.id === speaker.welcome.id && x.on === true));
 
+        const getStats = key => new Promise((resolve, reject) => {
+            const headers = key ? { Authorization: `Bearer ${key}` } : {};
+            require("http").get(`http://127.0.0.1:${PORT}/stats`, { headers, agent: false }, response => {
+                let body = "";
+                response.on("data", chunk => body += chunk);
+                response.on("end", () => resolve({ status: response.statusCode, body: JSON.parse(body) }));
+            }).on("error", reject);
+        });
+        const noKey = await getStats("");
+        const wrongKey = await getStats("not-a-real-key-at-all");
+        const withKey = await getStats(KEY);
+        const mine = withKey.body.servers && withKey.body.servers.find(x => x.jobId === "abc-123");
+        check("stats need a dev key", noKey.status === 401 && wrongKey.status === 401);
+        check("stats count everyone online", withKey.status === 200 && withKey.body.online === 7);
+        check("stats list who's in each server", mine && mine.placeId === 6602 && mine.users.length === 6 && mine.users.some(x => x.speaker && x.name === "nate" && x.talking));
+
         const badRoom = await new Promise(resolve => {
             const socket = new WebSocket(URL);
             socket.on("open", () => socket.send(JSON.stringify({ t: "hello", v: 1, room: "../etc", user: 1 })));

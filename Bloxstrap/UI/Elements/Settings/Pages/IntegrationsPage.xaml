@@ -97,6 +97,13 @@
         </controls:OptionControl>
 
         <controls:OptionControl
+            Header="Who's online"
+            Description="How many people are in game with FluxStrap right now, which servers they're in and their usernames. Needs your voice key. Also in the tray menu while you play."
+            Visibility="{Binding DevBuildVisibility, Mode=OneTime}">
+            <ui:Button Content="Open" Width="200" Command="{Binding OpenOnlineCommand}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl
             Header="Voice key"
             Description="The dev key you were given, so the voice server lets you talk. Keep it to yourself."
             Visibility="{Binding DevBuildVisibility, Mode=OneTime}"
