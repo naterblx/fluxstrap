@@ -75,7 +75,7 @@ namespace Bloxstrap.Models.Persistable
         public int VoiceChatVolume { get; set; } = 100;
         public string VoiceChatServer { get; set; } = "";
         public string VoiceChatKey { get; set; } = "";
-        public bool VoiceChatOpenMic { get; set; } = false;
+        public bool VoiceChatOpenMic { get; set; } = true; // like roblox, with the mute button
         public int VoiceChatPushToTalkKey { get; set; } = 0x56; // V
         public int VoiceChatMicrophone { get; set; } = -1; // -1 = windows default
 

@@ -50,8 +50,10 @@ Roblox/Bloxstrap/Fishstrap install keeps working next to it.
 - VR through SteamVR on the 2019, 2020 and 2021 clients, including headsets
   that aren't plugged in over USB (Quest over Steam Link, Air Link or Virtual
   Desktop). Turn on "VR Enabled" in Global Settings.
-- Voice chat between FluxStrap users in the same game server, through the
-  FluxStrap voice server. Everyone can listen; only the dev build can talk.
+- Proximity voice chat between FluxStrap users, like Roblox's: voices get
+  quieter with distance, pan left and right, and go silent past 80 studs.
+  Everyone can listen; only the dev build can talk, with a mute button over
+  the game. Works on the 2019, 2020 and 2021 clients.
 
 ## Public and dev builds
 
@@ -73,6 +75,12 @@ The server is in [`VoiceServer/`](VoiceServer). It's a small Node.js WebSocket
 relay. Fluxer itself doesn't need any changes, because FluxStrap already knows
 which game server you're in from the client's log. Everyone in the same server
 shares a room.
+
+It's proximity chat. FluxStrap reads where your character is from the client's
+camera (`Fluxer/CameraReader.cs`) and reports it a few times a second. The
+server only sends a speaker's voice to people within 90 studs, and FluxStrap
+fades voices out by 80 and pans them by direction. A client whose position
+can't be read, like the 64-bit 2022 client, doesn't get any voice.
 
 To host it on Render's free plan:
 

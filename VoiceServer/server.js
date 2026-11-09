@@ -8,12 +8,18 @@
 //   DEV_KEYS   optional extra name=key pairs that work without the secret, e.g. "nate=4f0c..."
 //   PORT       port to listen on (set automatically on Render)
 //
+// Voice is proximity based, like Roblox's: clients report where their character is, and a speaker's audio only
+// goes to people within HEAR_DISTANCE studs of them. Clients that haven't reported a position hear nobody.
+//
 // Protocol (WebSocket at /voice):
-//   client -> server  text   {"t":"hello","v":1,"room":"<placeId>/<jobId>","user":<userId>,"key":"<dev key or empty>"}
+//   client -> server  text   {"t":"hello","v":2,"room":"<placeId>/<jobId>","user":<userId>,"key":"<dev key or empty>"}
+//   client -> server  text   {"t":"pos","x":<n>,"y":<n>,"z":<n>}     a few times a second, where the client's character is
 //   server -> client  text   {"t":"welcome","id":<n>,"speaker":<bool>,"name":<string|null>}
 //   server -> client  text   {"t":"room","listeners":<n>,"speakers":[{"id":<n>,"name":"<name>"}]}
 //   speaker -> server text   {"t":"talk","on":<bool>}                 -> relayed as {"t":"talk","id":<n>,"on":<bool>}
-//   speaker -> server binary one Opus frame (48 kHz mono, 20 ms)     -> relayed as [uint32 LE speaker id][frame]
+//   speaker -> server binary one Opus frame (48 kHz mono, 20 ms)     -> relayed as [uint32 LE speaker id][float32 LE x, y, z][frame]
+//
+// Version 1 clients (FluxStrap 1.2.x) never report a position, so they get no audio.
 
 "use strict";
 
@@ -30,6 +36,8 @@ const MAX_FRAMES_PER_SECOND = 75; // 50 is normal for 20 ms frames
 const HELLO_TIMEOUT_MS = 10000;
 const PING_INTERVAL_MS = 20000;
 const ROOM_PATTERN = /^\d{1,20}\/[\w-]{1,64}$/;
+const HEAR_DISTANCE = 90; // studs. clients fade voices out by 80, this leaves room for movement between updates
+const MAX_POSITIONS_PER_SECOND = 20;
 
 const KEY_SECRET = (process.env.KEY_SECRET || "").trim();
 const revoked = new Set((process.env.REVOKED || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean));
@@ -98,7 +106,7 @@ function leave(client) {
 }
 
 function onHello(client, message) {
-    if (message.v !== 1 || typeof message.room !== "string" || !ROOM_PATTERN.test(message.room)) {
+    if ((message.v !== 1 && message.v !== 2) || typeof message.room !== "string" || !ROOM_PATTERN.test(message.room)) {
         send(client, { t: "error", message: "bad hello" });
         client.socket.close(4000, "bad hello");
         return;
@@ -118,6 +126,7 @@ function onHello(client, message) {
     client.speaker = name !== null;
     client.name = name;
     client.user = Number.isSafeInteger(message.user) ? message.user : 0;
+    client.version = message.v;
 
     members.add(client);
     rooms.set(client.room, members);
@@ -138,13 +147,38 @@ function relayAudio(client, data) {
 
     if (++client.frames > MAX_FRAMES_PER_SECOND || data.length === 0 || data.length > MAX_FRAME_BYTES) return;
 
-    const packet = Buffer.allocUnsafe(4 + data.length);
+    // nobody knows where you are, so nobody's close enough to hear you
+    if (!client.pos) return;
+
+    const packet = Buffer.allocUnsafe(16 + data.length);
     packet.writeUInt32LE(client.id, 0);
-    data.copy(packet, 4);
+    packet.writeFloatLE(client.pos.x, 4);
+    packet.writeFloatLE(client.pos.y, 8);
+    packet.writeFloatLE(client.pos.z, 12);
+    data.copy(packet, 16);
 
     for (const member of rooms.get(client.room) || []) {
-        if (member !== client && member.socket.readyState === member.socket.OPEN) member.socket.send(packet);
+        if (member === client || !member.pos || member.version < 2 || member.socket.readyState !== member.socket.OPEN) continue;
+
+        const dx = member.pos.x - client.pos.x, dy = member.pos.y - client.pos.y, dz = member.pos.z - client.pos.z;
+
+        if (dx * dx + dy * dy + dz * dz <= HEAR_DISTANCE * HEAR_DISTANCE) member.socket.send(packet);
     }
+}
+
+function onPosition(client, message) {
+    const now = Date.now();
+
+    if (now - client.posWindowStart >= 1000) {
+        client.posWindowStart = now;
+        client.positions = 0;
+    }
+
+    if (++client.positions > MAX_POSITIONS_PER_SECOND) return;
+
+    const { x, y, z } = message;
+
+    if ([x, y, z].every(v => typeof v === "number" && Number.isFinite(v) && Math.abs(v) < 1e6)) client.pos = { x, y, z };
 }
 
 const server = http.createServer((request, response) => {
@@ -166,7 +200,7 @@ wss.on("connection", socket => {
         return;
     }
 
-    const client = { id: nextId++, socket, room: null, speaker: false, name: null, user: 0, alive: true, windowStart: 0, frames: 0 };
+    const client = { id: nextId++, socket, room: null, speaker: false, name: null, user: 0, alive: true, windowStart: 0, frames: 0, version: 1, pos: null, posWindowStart: 0, positions: 0 };
     const helloTimer = setTimeout(() => { if (!client.room) socket.close(4002, "no hello"); }, HELLO_TIMEOUT_MS);
 
     socket.on("pong", () => { client.alive = true; });
@@ -188,6 +222,8 @@ wss.on("connection", socket => {
 
         if (message.t === "hello" && !client.room) {
             onHello(client, message);
+        } else if (message.t === "pos" && client.room) {
+            onPosition(client, message);
         } else if (message.t === "talk" && client.room && client.speaker) {
             const relay = JSON.stringify({ t: "talk", id: client.id, on: message.on === true });
 

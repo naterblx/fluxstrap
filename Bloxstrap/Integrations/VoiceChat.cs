@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 
@@ -7,12 +8,16 @@ using Concentus.Enums;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
+using Bloxstrap.Fluxer;
+
 namespace Bloxstrap.Integrations
 {
     /// <summary>
     /// Voice chat through the FluxStrap voice server (VoiceServer/ in the repository), so Fluxer itself doesn't need
     /// to change. Everyone in the same game server shares a room. Every build can listen; dev builds can talk if the
     /// server accepts their dev key, which the server checks itself, so a modified public build still can't talk.
+    /// It's proximity chat like Roblox's: each client reports where its character is (read from the client's camera,
+    /// see Fluxer/CameraReader.cs), the server only passes voices to people nearby, and they fade with distance.
     /// </summary>
     public class VoiceChat : IDisposable
     {
@@ -34,12 +39,16 @@ namespace Bloxstrap.Integrations
         private const int MaxPacketBytes = 1275;
 
         private readonly ActivityWatcher _activityWatcher;
+        private readonly CameraReader _camera;
+
+        private readonly object _selfLock = new();
+        private CameraReader.CameraState? _self;
 
         private readonly object _sessionLock = new();
         private CancellationTokenSource? _session;
         private Channel<(WebSocketMessageType Type, byte[] Data)>? _outgoing;
 
-        private readonly MixingSampleProvider _mixer = new(WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 1)) { ReadFully = true };
+        private readonly MixingSampleProvider _mixer = new(WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 2)) { ReadFully = true };
         private readonly VolumeSampleProvider _volume;
         private WaveOutEvent? _output;
 
@@ -49,6 +58,21 @@ namespace Bloxstrap.Integrations
         private bool _disposed = false;
 
         public string Status { get; private set; } = "Not in a game";
+
+        /// <summary>
+        /// Whether the server accepted our dev key for this game
+        /// </summary>
+        public bool CanTalk { get; private set; } = false;
+
+        /// <summary>
+        /// Whether we're sending voice right now
+        /// </summary>
+        public bool Transmitting { get; private set; } = false;
+
+        /// <summary>
+        /// The mute button. Nothing gets sent while it's on.
+        /// </summary>
+        public bool Muted { get; set; } = false;
 
         /// <summary>
         /// Short messages worth showing as a notification
@@ -65,12 +89,17 @@ namespace Bloxstrap.Integrations
                 BufferDuration = TimeSpan.FromSeconds(1),
                 DiscardOnBufferOverflow = true
             };
-            public ISampleProvider? Input;
+            public SpatialSampleProvider? Input;
         }
 
-        public VoiceChat(ActivityWatcher activityWatcher)
+        public VoiceChat(ActivityWatcher activityWatcher, int gamePid)
         {
             _activityWatcher = activityWatcher;
+            _camera = new CameraReader(gamePid);
+
+            if (!_camera.Supported)
+                App.Logger.WriteLine("VoiceChat", "This client's position can't be read, so voice chat stays off for it");
+
             _volume = new(_mixer) { Volume = Math.Clamp(App.Settings.Prop.VoiceChatVolume, 0, 200) / 100f };
 
             _activityWatcher.OnGameJoin += (_, _) => Join();
@@ -95,6 +124,9 @@ namespace Bloxstrap.Integrations
             string room = $"{data.PlaceId}/{data.JobId}";
 
             Leave();
+
+            // a new game means a new Workspace and camera
+            _camera.Reset();
 
             var session = new CancellationTokenSource();
 
@@ -189,9 +221,12 @@ namespace Bloxstrap.Integrations
             }, token);
 
             string key = App.IsDevBuild ? App.Settings.Prop.VoiceChatKey.Trim() : "";
-            Queue(WebSocketMessageType.Text, JsonSerializer.SerializeToUtf8Bytes(new { t = "hello", v = 1, room, user = userId, key }));
+            Queue(WebSocketMessageType.Text, JsonSerializer.SerializeToUtf8Bytes(new { t = "hello", v = 2, room, user = userId, key }));
 
             StartPlayback();
+
+            using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var positionTask = Task.Run(() => ReportPosition(connection.Token));
 
             try
             {
@@ -226,11 +261,18 @@ namespace Bloxstrap.Integrations
             }
             finally
             {
+                connection.Cancel();
+                await positionTask;
+
                 _outgoing = null;
                 outgoing.Writer.TryComplete();
 
                 StopCapture();
                 ClearSpeakers();
+                CanTalk = false;
+
+                lock (_selfLock)
+                    _self = null;
 
                 try
                 {
@@ -257,6 +299,8 @@ namespace Bloxstrap.Integrations
                 case "welcome":
                     bool canTalk = root.GetProperty("speaker").GetBoolean();
                     App.Logger.WriteLine(LOG_IDENT, $"Connected to voice chat ({(canTalk ? "can talk" : "listening")})");
+
+                    CanTalk = canTalk;
 
                     if (canTalk)
                         StartCapture();
@@ -315,6 +359,41 @@ namespace Bloxstrap.Integrations
                 return _speakers.Values.Select(x => x.Name).Distinct().ToArray();
         }
 
+        /// <summary>
+        /// Tells the server where our character is a few times a second, and keeps our camera for panning voices
+        /// </summary>
+        private async Task ReportPosition(CancellationToken token)
+        {
+            var last = new Vector3(float.NaN);
+            var lastSent = DateTime.MinValue;
+
+            while (!token.IsCancellationRequested)
+            {
+                if (_camera.TryRead(out var state))
+                {
+                    lock (_selfLock)
+                        _self = state;
+
+                    // only when it moves, plus now and then so the server never forgets us
+                    if (Vector3.DistanceSquared(state.Focus, last) > 0.25f || DateTime.Now - lastSent > TimeSpan.FromSeconds(2))
+                    {
+                        Queue(WebSocketMessageType.Text, JsonSerializer.SerializeToUtf8Bytes(new { t = "pos", x = state.Focus.X, y = state.Focus.Y, z = state.Focus.Z }));
+                        last = state.Focus;
+                        lastSent = DateTime.Now;
+                    }
+                }
+
+                try
+                {
+                    await Task.Delay(200, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
         #region Playback
         private void StartPlayback()
         {
@@ -333,23 +412,37 @@ namespace Bloxstrap.Integrations
             _output = null;
         }
 
+        // [speaker id][speaker position x, y, z][opus frame]
         private void OnAudio(byte[] data, int length)
         {
-            if (length <= 4)
+            if (length <= 16)
                 return;
 
             uint id = BitConverter.ToUInt32(data, 0);
+            var position = new Vector3(BitConverter.ToSingle(data, 4), BitConverter.ToSingle(data, 8), BitConverter.ToSingle(data, 12));
             var pcm = new short[FrameSamples];
+
+            CameraReader.CameraState? self;
+
+            lock (_selfLock)
+                self = _self;
 
             lock (_speakers)
             {
                 var speaker = GetSpeaker(id);
 
+                if (self is CameraReader.CameraState me && speaker.Input is not null)
+                {
+                    // distance from your character, direction from your camera
+                    speaker.Input.TargetGain = SpatialVoice.GetGain(Vector3.Distance(me.Focus, position));
+                    speaker.Input.TargetPan = SpatialVoice.GetPan(me.Position, me.Right, position);
+                }
+
                 int samples;
 
                 try
                 {
-                    samples = speaker.Decoder.Decode(data.AsSpan(4, length - 4), pcm, FrameSamples, false);
+                    samples = speaker.Decoder.Decode(data.AsSpan(16, length - 16), pcm, FrameSamples, false);
                 }
                 catch (Exception)
                 {
@@ -371,7 +464,7 @@ namespace Bloxstrap.Integrations
             if (!_speakers.TryGetValue(id, out var speaker))
             {
                 speaker = new Speaker();
-                speaker.Input = speaker.Buffer.ToSampleProvider();
+                speaker.Input = new SpatialSampleProvider(speaker.Buffer.ToSampleProvider());
                 _mixer.AddMixerInput(speaker.Input);
                 _speakers[id] = speaker;
             }
@@ -401,7 +494,6 @@ namespace Bloxstrap.Integrations
         private IOpusEncoder? _encoder;
         private readonly short[] _frame = new short[FrameSamples];
         private int _frameFill = 0;
-        private bool _transmitting = false;
         private int _gateHold = 0;
 
         private void StartCapture()
@@ -454,7 +546,7 @@ namespace Bloxstrap.Integrations
 
             _input.Dispose();
             _input = null;
-            _transmitting = false;
+            Transmitting = false;
             _frameFill = 0;
         }
 
@@ -476,9 +568,9 @@ namespace Bloxstrap.Integrations
         {
             bool transmit = ShouldTransmit();
 
-            if (transmit != _transmitting)
+            if (transmit != Transmitting)
             {
-                _transmitting = transmit;
+                Transmitting = transmit;
                 Queue(WebSocketMessageType.Text, JsonSerializer.SerializeToUtf8Bytes(new { t = "talk", on = transmit }));
             }
 
@@ -494,6 +586,9 @@ namespace Bloxstrap.Integrations
 
         private bool ShouldTransmit()
         {
+            if (Muted)
+                return false;
+
             if (!App.Settings.Prop.VoiceChatOpenMic)
                 return (GetAsyncKeyState(App.Settings.Prop.VoiceChatPushToTalkKey) & 0x8000) != 0 && IsClientFocused();
 
@@ -556,6 +651,7 @@ namespace Bloxstrap.Integrations
             Leave();
             StopCapture();
             StopPlayback();
+            _camera.Dispose();
 
             GC.SuppressFinalize(this);
         }

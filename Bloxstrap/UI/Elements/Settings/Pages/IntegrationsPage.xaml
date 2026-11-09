@@ -83,7 +83,7 @@
 
         <controls:OptionControl
             Header="Hear voice chat"
-            Description="Plays voice chat from other FluxStrap users in the same game server. Needs activity tracking."
+            Description="Plays voice chat from FluxStrap users near you in the game. Voices get quieter the further away they are. Needs activity tracking, and works on the 2019, 2020 and 2021 clients."
             IsEnabled="{Binding InnerContent.IsChecked, ElementName=ActivityTrackingOption, Mode=OneWay}"
             x:Name="VoiceChatOption">
             <ui:ToggleSwitch IsChecked="{Binding VoiceChatEnabled, Mode=TwoWay}" />
@@ -106,7 +106,7 @@
 
         <controls:OptionControl
             Header="Open mic"
-            Description="Sends your voice whenever you speak, instead of only while you hold the push-to-talk key."
+            Description="Sends your voice whenever you speak, like Roblox. Use the mic button in the top left of the game to mute. Turn this off to use push-to-talk instead."
             Visibility="{Binding DevBuildVisibility, Mode=OneTime}"
             IsEnabled="{Binding InnerContent.IsChecked, ElementName=VoiceChatOption, Mode=OneWay}"
             x:Name="OpenMicOption">
