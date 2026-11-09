@@ -1,0 +1,14 @@
+# Render blueprint for the FluxStrap voice server (VoiceServer/)
+# On render.com: New > Blueprint, pick this repository, then fill in DEV_KEYS when asked
+services:
+  - type: web
+    name: fluxstrap-voice
+    runtime: node
+    plan: free
+    rootDir: VoiceServer
+    buildCommand: npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: DEV_KEYS
+        sync: false

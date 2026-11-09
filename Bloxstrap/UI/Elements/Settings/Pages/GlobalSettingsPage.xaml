@@ -85,7 +85,8 @@
         </controls:OptionControl>
 
         <controls:OptionControl 
-            Header="{x:Static resources:Strings.Menu_GBSEditor_VREnabled_Title}">
+            Header="{x:Static resources:Strings.Menu_GBSEditor_VREnabled_Title}"
+            Description="Plays in your headset through SteamVR, including Quest over Steam Link, Air Link or Virtual Desktop. Works on the 2019, 2020 and 2021 clients.">
             <ui:ToggleSwitch Margin="5,0,0,0" Padding="10,5,10,5" IsChecked="{Binding VREnabled}" />
         </controls:OptionControl>
     </StackPanel>

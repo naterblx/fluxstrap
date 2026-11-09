@@ -70,6 +70,15 @@ namespace Bloxstrap.Models.Persistable
         public bool ShowServerDetails { get; set; } = false;
         public ObservableCollection<CustomIntegration> CustomIntegrations { get; set; } = new();
 
+        // voice chat (see Integrations/VoiceChat.cs), only dev builds can talk
+        public bool VoiceChatEnabled { get; set; } = true;
+        public int VoiceChatVolume { get; set; } = 100;
+        public string VoiceChatServer { get; set; } = "";
+        public string VoiceChatKey { get; set; } = "";
+        public bool VoiceChatOpenMic { get; set; } = false;
+        public int VoiceChatPushToTalkKey { get; set; } = 0x56; // V
+        public int VoiceChatMicrophone { get; set; } = -1; // -1 = windows default
+
         // mod preset configuration
         public bool UseDisableAppPatch { get; set; } = false;
     }

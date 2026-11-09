@@ -32,6 +32,15 @@ namespace Bloxstrap
 
         public static bool HasProjectRepository => !String.IsNullOrEmpty(ProjectRepository);
 
+        // dev builds can talk in voice chat. they're only built locally and never published, so they don't auto-update
+#if DEV_BUILD
+        public const bool IsDevBuild = true;
+#else
+        public const bool IsDevBuild = false;
+#endif
+
+        public static string DisplayVersion => IsDevBuild ? $"{Version} (Dev)" : Version;
+
         public const string FluxerPlayerAppName = "FluxerPlayerBeta.exe";
         public const string RobloxPlayerAppName = "RobloxPlayerBeta.exe";
         public const string RobloxStudioAppName = "RobloxStudioBeta.exe";
@@ -155,6 +164,13 @@ namespace Bloxstrap
                 return null;
             }
 
+            // a public release would replace the dev build and take its voice chat away
+            if (IsDevBuild)
+            {
+                Logger.WriteLine(LOG_IDENT, "Dev builds don't auto-update, skipping");
+                return null;
+            }
+
             try
             {
                 Uri githubReleasesUrl = new($"https://api.github.com/repos/{ProjectRepository}/releases/latest");
@@ -212,7 +228,7 @@ namespace Bloxstrap
 
             base.OnStartup(e);
 
-            Logger.WriteLine(LOG_IDENT, $"Starting {ProjectName} v{Version}");
+            Logger.WriteLine(LOG_IDENT, $"Starting {ProjectName} v{DisplayVersion}");
 
             string userAgent = $"{ProjectName}/{Version}";
 

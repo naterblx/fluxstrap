@@ -1,0 +1,19 @@
+{
+  "name": "fluxstrap-voice",
+  "version": "1.0.0",
+  "description": "Voice chat relay for FluxStrap",
+  "main": "server.js",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "new-key": "node server.js --new-key",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

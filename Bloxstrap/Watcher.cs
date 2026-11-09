@@ -18,6 +18,8 @@ namespace Bloxstrap
 
         public readonly DiscordRichPresence? RichPresence;
 
+        public readonly VoiceChat? VoiceChat;
+
         private readonly Dictionary<int, FpsUnlocker> _fpsUnlockers = new();
 
         public Watcher()
@@ -80,6 +82,9 @@ namespace Bloxstrap
                     App.Logger.WriteLine(LOG_IDENT, "Running rpc");
                     RichPresence = new(ActivityWatcher);
                 }
+
+                if (App.Settings.Prop.VoiceChatEnabled)
+                    VoiceChat = new(ActivityWatcher);
             }
 
             _notifyIcon = new(this);
@@ -206,6 +211,7 @@ namespace Bloxstrap
 
             _notifyIcon?.Dispose();
             RichPresence?.Dispose();
+            VoiceChat?.Dispose();
 
             App.State.Prop.WatcherRunning = false;
 

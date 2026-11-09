@@ -386,6 +386,7 @@ namespace Bloxstrap
 
             // the 2022 and 2026 clients keep getting patched for a while after starting, which needs us alive
             ClientPatcher.WaitForPatching();
+            VrEnabler.WaitForPatching();
         }
 
         /// <summary>
@@ -523,6 +524,9 @@ namespace Bloxstrap
                 ShowError($"The {_package.Label} client could not be started.");
                 return;
             }
+
+            if (!IsStudioLaunch && VrEnabler.IsVrEnabled)
+                VrEnabler.Start(_appPid);
 
             try
             {

@@ -1,0 +1,94 @@
+// Checks the relay rules: dev keys can talk, everyone else in the room only hears, other rooms hear nothing.
+// Run with: npm test
+
+"use strict";
+
+const { spawn } = require("child_process");
+const WebSocket = require("ws");
+
+const PORT = 18080 + Math.floor(Math.random() * 1000);
+const KEY = "test-key-0123456789abcdef";
+const URL = `ws://127.0.0.1:${PORT}/voice`;
+
+let failures = 0;
+
+function check(name, ok) {
+    console.log(`${ok ? "PASS" : "FAIL"}  ${name}`);
+    if (!ok) failures++;
+}
+
+function connect(room, key = "") {
+    return new Promise((resolve, reject) => {
+        const socket = new WebSocket(URL);
+        const client = { socket, audio: [], messages: [], welcome: null };
+
+        socket.on("message", (data, isBinary) => {
+            if (isBinary) {
+                client.audio.push(data);
+                return;
+            }
+
+            const message = JSON.parse(data.toString());
+            client.messages.push(message);
+
+            if (message.t === "welcome") {
+                client.welcome = message;
+                resolve(client);
+            }
+        });
+
+        socket.on("open", () => socket.send(JSON.stringify({ t: "hello", v: 1, room, user: 1, key })));
+        socket.on("error", reject);
+    });
+}
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+(async () => {
+    const server = spawn(process.execPath, [__dirname + "/server.js"], { env: { ...process.env, PORT, DEV_KEYS: `nate=${KEY}` }, stdio: "inherit" });
+    await wait(700);
+
+    try {
+        const speaker = await connect("6602/abc-123", KEY);
+        const listener = await connect("6602/abc-123");
+        const faker = await connect("6602/abc-123", "not-a-real-key-at-all");
+        const otherRoom = await connect("6602/other-server");
+
+        check("dev key is a speaker", speaker.welcome.speaker === true && speaker.welcome.name === "nate");
+        check("no key is a listener", listener.welcome.speaker === false);
+        check("wrong key is a listener", faker.welcome.speaker === false);
+
+        await wait(200);
+        const room = listener.messages.filter(x => x.t === "room").pop();
+        check("room lists the speaker", room && room.listeners === 3 && room.speakers.length === 1 && room.speakers[0].name === "nate");
+
+        const frame = Buffer.from([1, 2, 3, 4, 5]);
+        speaker.socket.send(frame);
+        faker.socket.send(Buffer.from([9, 9, 9]));
+        speaker.socket.send(JSON.stringify({ t: "talk", on: true }));
+        await wait(300);
+
+        const heard = listener.audio[0];
+        check("listener hears the speaker", listener.audio.length === 1 && heard.readUInt32LE(0) === speaker.welcome.id && heard.subarray(4).equals(frame));
+        check("faker's audio is dropped", speaker.audio.length === 0 && listener.audio.length === 1);
+        check("other rooms hear nothing", otherRoom.audio.length === 0);
+        check("talk indicator is relayed", listener.messages.some(x => x.t === "talk" && x.id === speaker.welcome.id && x.on === true));
+
+        const badRoom = await new Promise(resolve => {
+            const socket = new WebSocket(URL);
+            socket.on("open", () => socket.send(JSON.stringify({ t: "hello", v: 1, room: "../etc", user: 1 })));
+            socket.on("close", code => resolve(code));
+        });
+        check("bad room names are refused", badRoom === 4000);
+
+        for (const client of [speaker, listener, faker, otherRoom]) client.socket.close();
+    } catch (error) {
+        console.error(error);
+        failures++;
+    } finally {
+        server.kill();
+    }
+
+    console.log(failures === 0 ? "all passed" : `${failures} failed`);
+    process.exit(failures === 0 ? 0 : 1);
+})();

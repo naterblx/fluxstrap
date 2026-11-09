@@ -47,6 +47,49 @@ Roblox/Bloxstrap/Fishstrap install keeps working next to it.
   every client year
 - A Fluxer page in the settings to pick the default player and Studio year
   and see which clients are installed
+- VR through SteamVR on the 2019, 2020 and 2021 clients, including headsets
+  that aren't plugged in over USB (Quest over Steam Link, Air Link or Virtual
+  Desktop). Turn on "VR Enabled" in Global Settings.
+- Voice chat between FluxStrap users in the same game server, through the
+  FluxStrap voice server. Everyone can listen; only the dev build can talk.
+
+## Public and dev builds
+
+There are two builds of FluxStrap, made from the same code:
+
+- **Public** (`FluxStrap.exe`, tags `v1.2.0` and so on): the normal release.
+  It can hear voice chat but has no microphone code at all.
+- **Dev**: adds talking in voice chat, with push-to-talk or open mic. It's
+  never published or released. It's built locally with
+  `dotnet publish -p:Channel=Dev`, and it doesn't auto-update, so a public
+  release can't replace it.
+
+Talking also needs a dev key. The voice server checks it, so a modified public
+build still can't talk.
+
+## Voice chat server
+
+The server is in [`VoiceServer/`](VoiceServer). It's a small Node.js WebSocket
+relay. Fluxer itself doesn't need any changes, because FluxStrap already knows
+which game server you're in from the client's log. Everyone in the same server
+shares a room.
+
+To host it on Render's free plan:
+
+1. On render.com, choose **New > Blueprint** and pick this repository.
+   `render.yaml` sets up a service called `fluxstrap-voice`.
+2. When Render asks for `DEV_KEYS`, enter `name=key` pairs separated by commas.
+   Make a key with `node server.js --new-key nate` inside `VoiceServer`.
+3. FluxStrap connects to `wss://fluxstrap-voice.onrender.com/voice`. If Render
+   gives the service another address, change `VoiceChat.DefaultServer`.
+
+To give someone the ability to talk, add a key for them to `DEV_KEYS`. To take
+it away, remove their key. Render restarts the server whenever you save.
+
+Free services go to sleep after about 15 minutes without anyone connected. The
+first person to join voice after that waits up to a minute for it to wake up.
+
+`npm test` inside `VoiceServer` checks the relay rules.
 
 ## Credits
 

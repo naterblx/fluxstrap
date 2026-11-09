@@ -1,7 +1,9 @@
 ﻿using Bloxstrap.UI.Elements.Controls;
+using Bloxstrap.Integrations;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using System.Collections.ObjectModel;
+using System.Windows;
 using System.Windows.Input;
 using Wpf.Ui.Common.Interfaces;
 
@@ -24,6 +26,89 @@ namespace Bloxstrap.UI.ViewModels.Settings
         {
             get => App.Settings.Prop.RobloxTheme;
             set => App.Settings.Prop.RobloxTheme = value;
+        }
+
+        public string VoiceChatDescription => App.IsDevBuild
+            ? "Talk to and hear other FluxStrap users in the same game server. Anyone using FluxStrap can hear you; only dev builds with a voice key can talk."
+            : "Hear the FluxStrap team when they're in the same game server as you. Talking is only available in the dev build.";
+
+        public Visibility DevBuildVisibility => App.IsDevBuild ? Visibility.Visible : Visibility.Collapsed;
+
+        public bool VoiceChatEnabled
+        {
+            get => App.Settings.Prop.VoiceChatEnabled;
+            set
+            {
+                App.Settings.Prop.VoiceChatEnabled = value;
+                OnPropertyChanged(nameof(VoiceChatPushToTalkAvailable));
+            }
+        }
+
+        public int VoiceChatVolume
+        {
+            get => App.Settings.Prop.VoiceChatVolume;
+            set
+            {
+                App.Settings.Prop.VoiceChatVolume = value;
+                OnPropertyChanged(nameof(VoiceChatVolumeText));
+            }
+        }
+
+        public string VoiceChatVolumeText => $"{App.Settings.Prop.VoiceChatVolume}%. Takes effect the next time you join a game.";
+
+        public string VoiceChatKey
+        {
+            get => App.Settings.Prop.VoiceChatKey;
+            set => App.Settings.Prop.VoiceChatKey = value.Trim();
+        }
+
+        public bool VoiceChatOpenMic
+        {
+            get => App.Settings.Prop.VoiceChatOpenMic;
+            set
+            {
+                App.Settings.Prop.VoiceChatOpenMic = value;
+                OnPropertyChanged(nameof(VoiceChatPushToTalkAvailable));
+            }
+        }
+
+        public bool VoiceChatPushToTalkAvailable => App.Settings.Prop.VoiceChatEnabled && !App.Settings.Prop.VoiceChatOpenMic;
+
+        public IEnumerable<string> PushToTalkKeys => VoiceChat.PushToTalkKeys.Keys;
+
+        public string SelectedPushToTalkKey
+        {
+            get => VoiceChat.PushToTalkKeys.FirstOrDefault(x => x.Value == App.Settings.Prop.VoiceChatPushToTalkKey).Key ?? VoiceChat.PushToTalkKeys.Keys.First();
+            set => App.Settings.Prop.VoiceChatPushToTalkKey = VoiceChat.PushToTalkKeys[value];
+        }
+
+        // index 0 is the windows default (device -1), the rest are wave-in devices in order
+        public List<string> Microphones { get; } = GetMicrophones();
+
+        public int SelectedMicrophoneIndex
+        {
+            get => Math.Clamp(App.Settings.Prop.VoiceChatMicrophone + 1, 0, Microphones.Count - 1);
+            set => App.Settings.Prop.VoiceChatMicrophone = value - 1;
+        }
+
+        private static List<string> GetMicrophones()
+        {
+            var names = new List<string> { "Windows default" };
+
+            if (!App.IsDevBuild)
+                return names;
+
+            try
+            {
+                for (int i = 0; i < NAudio.Wave.WaveInEvent.DeviceCount; i++)
+                    names.Add(NAudio.Wave.WaveInEvent.GetCapabilities(i).ProductName);
+            }
+            catch (Exception ex)
+            {
+                App.Logger.WriteException("IntegrationsViewModel::GetMicrophones", ex);
+            }
+
+            return names;
         }
 
         public ICommand AddIntegrationCommand => new RelayCommand(AddIntegration);

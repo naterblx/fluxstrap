@@ -29,7 +29,7 @@ namespace Bloxstrap.UI
             _notifyIcon = new(new System.ComponentModel.Container())
             {
                 Icon = Properties.Resources.IconBloxstrap,
-                Text = "Fishstrap",
+                Text = App.ProjectName,
                 Visible = true
             };
 
@@ -37,6 +37,9 @@ namespace Bloxstrap.UI
 
             if (_activityWatcher is not null && App.Settings.Prop.ShowServerDetails)
                 _activityWatcher.ShowNotif += ShowNotif;
+
+            if (_watcher.VoiceChat is not null)
+                _watcher.VoiceChat.OnNotice += (_, message) => ShowAlert("Voice chat", message, 6, null);
 
             _menuContainer = new(_watcher);
             _menuContainer.Show();

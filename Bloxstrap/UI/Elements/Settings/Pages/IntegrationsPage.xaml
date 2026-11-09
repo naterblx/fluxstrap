@@ -78,6 +78,56 @@
             <ui:ToggleSwitch IsChecked="{Binding DiscordAccountOnProfile, Mode=TwoWay}" />
         </controls:OptionControl>
 
+        <TextBlock Text="Voice chat" FontSize="20" FontWeight="Medium" Margin="0,16,0,0" />
+        <TextBlock Text="{Binding VoiceChatDescription, Mode=OneTime}" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+        <controls:OptionControl
+            Header="Hear voice chat"
+            Description="Plays voice chat from other FluxStrap users in the same game server. Needs activity tracking."
+            IsEnabled="{Binding InnerContent.IsChecked, ElementName=ActivityTrackingOption, Mode=OneWay}"
+            x:Name="VoiceChatOption">
+            <ui:ToggleSwitch IsChecked="{Binding VoiceChatEnabled, Mode=TwoWay}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl
+            Header="Voice chat volume"
+            Description="{Binding VoiceChatVolumeText}"
+            IsEnabled="{Binding InnerContent.IsChecked, ElementName=VoiceChatOption, Mode=OneWay}">
+            <Slider Width="200" Minimum="0" Maximum="200" TickFrequency="10" IsSnapToTickEnabled="True" Value="{Binding VoiceChatVolume, Mode=TwoWay}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl
+            Header="Voice key"
+            Description="The dev key you were given, so the voice server lets you talk. Keep it to yourself."
+            Visibility="{Binding DevBuildVisibility, Mode=OneTime}"
+            IsEnabled="{Binding InnerContent.IsChecked, ElementName=VoiceChatOption, Mode=OneWay}">
+            <ui:TextBox Width="200" Padding="10,5,10,5" Text="{Binding VoiceChatKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl
+            Header="Open mic"
+            Description="Sends your voice whenever you speak, instead of only while you hold the push-to-talk key."
+            Visibility="{Binding DevBuildVisibility, Mode=OneTime}"
+            IsEnabled="{Binding InnerContent.IsChecked, ElementName=VoiceChatOption, Mode=OneWay}"
+            x:Name="OpenMicOption">
+            <ui:ToggleSwitch IsChecked="{Binding VoiceChatOpenMic, Mode=TwoWay}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl
+            Header="Push-to-talk key"
+            Description="Hold this while the Fluxer window is focused to talk."
+            Visibility="{Binding DevBuildVisibility, Mode=OneTime}"
+            IsEnabled="{Binding VoiceChatPushToTalkAvailable}">
+            <ComboBox Width="200" Padding="10,5,10,5" ItemsSource="{Binding PushToTalkKeys, Mode=OneTime}" SelectedItem="{Binding SelectedPushToTalkKey, Mode=TwoWay}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl
+            Header="Microphone"
+            Visibility="{Binding DevBuildVisibility, Mode=OneTime}"
+            IsEnabled="{Binding InnerContent.IsChecked, ElementName=VoiceChatOption, Mode=OneWay}">
+            <ComboBox Width="200" Padding="10,5,10,5" ItemsSource="{Binding Microphones, Mode=OneTime}" SelectedIndex="{Binding SelectedMicrophoneIndex, Mode=TwoWay}" />
+        </controls:OptionControl>
+
         <TextBlock Text="{x:Static resources:Strings.Common_WindowManipulation}" FontSize="20" FontWeight="Medium" Margin="0,16,0,0" />
         <controls:OptionControl 
             Header="{x:Static resources:Strings.Menu_Integrations_EnableWindowManipulation_Title}"
