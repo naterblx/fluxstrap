@@ -3,7 +3,9 @@
 // Relays voice chat between FluxStrap users. Everyone in the same Fluxer game server (same place and job id)
 // shares a room. Anyone can connect and listen; only connections that present a dev key can send audio.
 //
-//   DEV_KEYS   comma separated name=key pairs, e.g. "nate=4f0c...,alex=91ab..." (make keys with: node server.js --new-key nate)
+//   KEY_SECRET the secret dev keys are signed with (see keygen.js), so any key made with it can talk
+//   REVOKED    comma separated names whose keys no longer work, e.g. "alex,sam"
+//   DEV_KEYS   optional extra name=key pairs that work without the secret, e.g. "nate=4f0c..."
 //   PORT       port to listen on (set automatically on Render)
 //
 // Protocol (WebSocket at /voice):
@@ -18,12 +20,7 @@
 const crypto = require("crypto");
 const http = require("http");
 const { WebSocketServer } = require("ws");
-
-if (process.argv[2] === "--new-key") {
-    const name = (process.argv[3] || "dev").replace(/[^\w.-]/g, "");
-    console.log(`${name}=${crypto.randomBytes(24).toString("base64url")}`);
-    process.exit(0);
-}
+const { checkKey } = require("./keygen");
 
 const PORT = Number(process.env.PORT) || 8080;
 const MAX_CLIENTS = 2000;
@@ -34,6 +31,8 @@ const HELLO_TIMEOUT_MS = 10000;
 const PING_INTERVAL_MS = 20000;
 const ROOM_PATTERN = /^\d{1,20}\/[\w-]{1,64}$/;
 
+const KEY_SECRET = (process.env.KEY_SECRET || "").trim();
+const revoked = new Set((process.env.REVOKED || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean));
 const devKeys = new Map(); // sha256(key) -> name
 
 for (const pair of (process.env.DEV_KEYS || "").split(",")) {
@@ -56,13 +55,17 @@ function hash(value) {
 function lookupKey(key) {
     if (typeof key !== "string" || key.length < 16 || key.length > 200) return null;
 
-    const digest = hash(key);
+    let name = checkKey(KEY_SECRET, key);
 
-    for (const [known, name] of devKeys) {
-        if (crypto.timingSafeEqual(known, digest)) return name;
+    if (name === null) {
+        const digest = hash(key);
+
+        for (const [known, listed] of devKeys) {
+            if (crypto.timingSafeEqual(known, digest)) name = listed;
+        }
     }
 
-    return null;
+    return name !== null && !revoked.has(name.toLowerCase()) ? name : null;
 }
 
 function send(client, message) {
@@ -214,4 +217,4 @@ wss.on("connection", socket => {
     socket.on("close", () => clearInterval(client.pingTimer));
 });
 
-server.listen(PORT, () => console.log(`FluxStrap voice server listening on ${PORT} with ${devKeys.size} dev key(s)`));
+server.listen(PORT, () => console.log(`FluxStrap voice server listening on ${PORT}, signed keys ${KEY_SECRET.length >= 32 ? "on" : "off (no KEY_SECRET)"}, ${devKeys.size} listed key(s), ${revoked.size} revoked`));

@@ -1,5 +1,5 @@
 # Render blueprint for the FluxStrap voice server (VoiceServer/)
-# On render.com: New > Blueprint, pick this repository, then fill in DEV_KEYS when asked
+# On render.com: New > Blueprint, pick this repository, then fill in KEY_SECRET when asked
 services:
   - type: web
     name: fluxstrap-voice
@@ -10,5 +10,6 @@ services:
     startCommand: node server.js
     healthCheckPath: /healthz
     envVars:
-      - key: DEV_KEYS
+      # the secret dev keys are signed with, see VoiceServer/keygen.js
+      - key: KEY_SECRET
         sync: false

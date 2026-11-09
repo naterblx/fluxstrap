@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "new-key": "node server.js --new-key",
+    "new-secret": "node keygen.js --new-secret",
+    "key": "node keygen.js",
     "test": "node test.js"
   },
   "dependencies": {

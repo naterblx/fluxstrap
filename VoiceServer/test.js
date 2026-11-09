@@ -6,8 +6,12 @@
 const { spawn } = require("child_process");
 const WebSocket = require("ws");
 
+const { makeKey } = require("./keygen");
+
 const PORT = 18080 + Math.floor(Math.random() * 1000);
-const KEY = "test-key-0123456789abcdef";
+const SECRET = "test-secret-0123456789abcdefghijklmnop";
+const KEY = makeKey(SECRET, "nate");
+const LISTED_KEY = "listed-key-0123456789abcdef";
 const URL = `ws://127.0.0.1:${PORT}/voice`;
 
 let failures = 0;
@@ -45,16 +49,31 @@ function connect(room, key = "") {
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 (async () => {
-    const server = spawn(process.execPath, [__dirname + "/server.js"], { env: { ...process.env, PORT, DEV_KEYS: `nate=${KEY}` }, stdio: "inherit" });
+    const env = { ...process.env, PORT, KEY_SECRET: SECRET, REVOKED: "Sam", DEV_KEYS: `legacy=${LISTED_KEY}` };
+    const server = spawn(process.execPath, [__dirname + "/server.js"], { env, stdio: "inherit" });
     await wait(700);
 
     try {
+        // these go in a room of their own so they don't change the counts below
+        const keyRoom = "6602/key-checks";
+        const revoked = await connect(keyRoom, makeKey(SECRET, "sam"));
+        const forged = await connect(keyRoom, "nate.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        const otherSecret = await connect(keyRoom, makeKey("some-other-secret-0123456789abcdefgh", "nate"));
+        const listed = await connect(keyRoom, LISTED_KEY);
+
+        check("revoked names can't talk", revoked.welcome.speaker === false);
+        check("forged signatures can't talk", forged.welcome.speaker === false);
+        check("keys from another secret can't talk", otherSecret.welcome.speaker === false);
+        check("DEV_KEYS keys still work", listed.welcome.speaker === true && listed.welcome.name === "legacy");
+
+        for (const client of [revoked, forged, otherSecret, listed]) client.socket.close();
+
         const speaker = await connect("6602/abc-123", KEY);
         const listener = await connect("6602/abc-123");
         const faker = await connect("6602/abc-123", "not-a-real-key-at-all");
         const otherRoom = await connect("6602/other-server");
 
-        check("dev key is a speaker", speaker.welcome.speaker === true && speaker.welcome.name === "nate");
+        check("signed key is a speaker", speaker.welcome.speaker === true && speaker.welcome.name === "nate");
         check("no key is a listener", listener.welcome.speaker === false);
         check("wrong key is a listener", faker.welcome.speaker === false);
 

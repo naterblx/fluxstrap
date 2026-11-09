@@ -78,13 +78,17 @@ To host it on Render's free plan:
 
 1. On render.com, choose **New > Blueprint** and pick this repository.
    `render.yaml` sets up a service called `fluxstrap-voice`.
-2. When Render asks for `DEV_KEYS`, enter `name=key` pairs separated by commas.
-   Make a key with `node server.js --new-key nate` inside `VoiceServer`.
+2. When Render asks for `KEY_SECRET`, enter a secret from
+   `node keygen.js --new-secret`, run inside `VoiceServer`.
 3. FluxStrap connects to `wss://fluxstrap-voice.onrender.com/voice`. If Render
    gives the service another address, change `VoiceChat.DefaultServer`.
 
-To give someone the ability to talk, add a key for them to `DEV_KEYS`. To take
-it away, remove their key. Render restarts the server whenever you save.
+Dev keys are signed with that secret, so new keys work straight away without
+changing anything on the server. Make one with
+`node keygen.js --secret-file secret.txt alex`. To take a key away, add the name
+to the `REVOKED` environment variable (comma separated). Render restarts the
+server whenever you save. `DEV_KEYS` (`name=key` pairs) is still accepted for
+keys that aren't signed.
 
 Free services go to sleep after about 15 minutes without anyone connected. The
 first person to join voice after that waits up to a minute for it to wake up.
