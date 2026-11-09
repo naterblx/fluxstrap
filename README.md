@@ -55,54 +55,6 @@ Roblox/Bloxstrap/Fishstrap install keeps working next to it.
   Everyone can listen; only the dev build can talk, with a mute button over
   the game. Works on the 2019, 2020 and 2021 clients.
 
-## Public and dev builds
-
-There are two builds of FluxStrap, made from the same code:
-
-- **Public** (`FluxStrap.exe`, tags `v1.2.0` and so on): the normal release.
-  It can hear voice chat but has no microphone code at all.
-- **Dev**: adds talking in voice chat, with push-to-talk or open mic. It's
-  never published or released. It's built locally with
-  `dotnet publish -p:Channel=Dev`, and it doesn't auto-update, so a public
-  release can't replace it.
-
-Talking also needs a dev key. The voice server checks it, so a modified public
-build still can't talk.
-
-## Voice chat server
-
-The server is in [`VoiceServer/`](VoiceServer). It's a small Node.js WebSocket
-relay. Fluxer itself doesn't need any changes, because FluxStrap already knows
-which game server you're in from the client's log. Everyone in the same server
-shares a room.
-
-It's proximity chat. FluxStrap reads where your character is from the client's
-camera (`Fluxer/CameraReader.cs`) and reports it a few times a second. The
-server only sends a speaker's voice to people within 90 studs, and FluxStrap
-fades voices out by 80 and pans them by direction. A client whose position
-can't be read, like the 64-bit 2022 client, doesn't get any voice.
-
-To host it on Render's free plan:
-
-1. On render.com, choose **New > Blueprint** and pick this repository.
-   `render.yaml` sets up a service called `fluxstrap-voice`.
-2. When Render asks for `KEY_SECRET`, enter a secret from
-   `node keygen.js --new-secret`, run inside `VoiceServer`.
-3. FluxStrap connects to `wss://fluxstrap.onrender.com/voice`. If the service
-   ever moves, change `VoiceChat.DefaultServer`.
-
-Dev keys are signed with that secret, so new keys work straight away without
-changing anything on the server. Make one with
-`node keygen.js --secret-file secret.txt alex`. To take a key away, add the name
-to the `REVOKED` environment variable (comma separated). Render restarts the
-server whenever you save. `DEV_KEYS` (`name=key` pairs) is still accepted for
-keys that aren't signed.
-
-Free services go to sleep after about 15 minutes without anyone connected. The
-first person to join voice after that waits up to a minute for it to wake up.
-
-`npm test` inside `VoiceServer` checks the relay rules.
-
 ## Credits
 
 - [Fishstrap][fishstrap] and [Bloxstrap][bloxstrap] and all of their
