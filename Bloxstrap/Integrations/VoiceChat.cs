@@ -16,7 +16,7 @@ namespace Bloxstrap.Integrations
     /// </summary>
     public class VoiceChat : IDisposable
     {
-        public const string DefaultServer = "wss://fluxstrap-voice.onrender.com/voice";
+        public const string DefaultServer = "wss://fluxstrap.onrender.com/voice";
 
         public static readonly IReadOnlyDictionary<string, int> PushToTalkKeys = new Dictionary<string, int>
         {

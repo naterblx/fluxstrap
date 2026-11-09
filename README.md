@@ -80,8 +80,8 @@ To host it on Render's free plan:
    `render.yaml` sets up a service called `fluxstrap-voice`.
 2. When Render asks for `KEY_SECRET`, enter a secret from
    `node keygen.js --new-secret`, run inside `VoiceServer`.
-3. FluxStrap connects to `wss://fluxstrap-voice.onrender.com/voice`. If Render
-   gives the service another address, change `VoiceChat.DefaultServer`.
+3. FluxStrap connects to `wss://fluxstrap.onrender.com/voice`. If the service
+   ever moves, change `VoiceChat.DefaultServer`.
 
 Dev keys are signed with that secret, so new keys work straight away without
 changing anything on the server. Make one with
