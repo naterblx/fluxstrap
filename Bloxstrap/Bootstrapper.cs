@@ -306,7 +306,8 @@ namespace Bloxstrap
 
             if (!ResolvePackage(out string version))
             {
-                ShowError($"The {version} client is not available on the server yet.");
+                string available = _manifest is null ? "" : $"\n\nFluxer has these clients: {String.Join(", ", _manifest.Packages.Where(x => !x.IsStudio).Select(x => x.Year).Distinct().OrderBy(x => x))}.";
+                ShowError($"This game wants the {version} client, but Fluxer doesn't have one to download yet.{available}");
                 Dialog?.CloseBootstrapper();
                 return;
             }
@@ -319,7 +320,7 @@ namespace Bloxstrap
 
             if (_package.IsPrivate && !hasTicket && !_package.IsInstalled)
             {
-                ShowError($"The Rokori client has to be installed or updated first.\n\nOpen {FluxerSite.Url}, log in and press Play on a game once.");
+                ShowError($"FluxStrap hasn't downloaded the Rokori client yet. It's only handed out to logged in players, so FluxStrap gets it the first time a game on {FluxerSite.Domain} opens with it. Installing it with Rokori's own installer doesn't count.\n\nLog in on {FluxerSite.Domain} and press Play on a game that uses the 2026 client.");
                 Dialog?.CloseBootstrapper();
                 return;
             }
@@ -374,7 +375,7 @@ namespace Bloxstrap
                     App.Logger.WriteLine(LOG_IDENT, "No game ticket, sending the user to the website");
 
                     if (!App.LaunchSettings.QuietFlag.Active)
-                        Frontend.ShowMessageBox($"The {_package.Label} client is installed.\n\nLog in on {FluxerSite.Domain}, open a game and press Play.", MessageBoxImage.Information);
+                        Frontend.ShowMessageBox($"The {_package.Label} client is installed.\n\nLog in on {FluxerSite.Domain}, open a game and press Play. Each game picks which client year it uses.", MessageBoxImage.Information);
 
                     Utilities.ShellExecute(FluxerSite.GamesUrl);
                 }
@@ -413,9 +414,12 @@ namespace Bloxstrap
             {
                 package = _manifest.Find(version);
 
-                // every player year is published as 'L', so fall back to that for unknown variants
+                // most player years are published as 'L', but not all (2026 is 'E'), so fall back to any build of that year
                 if (package is null && !IsStudioLaunch && version.Length >= 4)
-                    package = _manifest.Find(version[..4] + "L");
+                {
+                    string year = version[..4];
+                    package = _manifest.Find(year + "L") ?? _manifest.Packages.FirstOrDefault(x => !x.IsStudio && x.Year == year);
+                }
             }
             else
             {

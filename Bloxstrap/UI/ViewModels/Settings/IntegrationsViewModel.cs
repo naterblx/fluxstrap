@@ -44,6 +44,12 @@ namespace Bloxstrap.UI.ViewModels.Settings
             }
         }
 
+        public bool ShowVoiceIndicators
+        {
+            get => App.Settings.Prop.ShowVoiceIndicators;
+            set => App.Settings.Prop.ShowVoiceIndicators = value;
+        }
+
         public int VoiceChatVolume
         {
             get => App.Settings.Prop.VoiceChatVolume;

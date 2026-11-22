@@ -18,6 +18,12 @@
         <TextBlock Margin="0,0,0,8" Text="{x:Static resources:Strings.Menu_Behaviour_Description}" FontSize="14" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
         <controls:OptionControl 
+            Header="Multi-instance launching"
+            Description="Run more than one Fluxer client at the same time. Turn it off to have a new game close the one that's already open.">
+            <ui:ToggleSwitch IsChecked="{Binding MultiInstanceLaunching, Mode=TwoWay}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl 
             Header="{x:Static resources:Strings.Menu_Behaviour_ConfirmLaunches_Title}"
             Description="{x:Static resources:Strings.Menu_Behaviour_ConfirmLaunches_Description}">
             <ui:ToggleSwitch IsChecked="{Binding ConfirmLaunches, Mode=TwoWay}" />

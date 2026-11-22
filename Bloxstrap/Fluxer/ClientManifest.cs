@@ -24,9 +24,12 @@ namespace Bloxstrap.Fluxer
         /// <summary>
         /// Distinct installable folders, newest year first
         /// </summary>
-        public IEnumerable<ClientPackage> GetDistinctFolders(bool studio)
+        /// <param name="includePrivate">also list private (unreleased) player builds, which the dev build offers</param>
+        public IEnumerable<ClientPackage> GetDistinctFolders(bool studio, bool includePrivate = false)
         {
-            return (studio ? Studios : Players)
+            var packages = studio ? Studios : includePrivate ? Packages.Where(x => !x.IsStudio) : Players;
+
+            return packages
                 .GroupBy(x => x.Folder)
                 .Select(x => x.First())
                 .OrderByDescending(x => x.Year);

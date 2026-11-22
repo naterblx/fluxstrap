@@ -25,6 +25,7 @@ namespace Bloxstrap.Models.Persistable
         public bool ForceLocalData { get; set; } = false;
         public bool CheckForUpdates { get; set; } = true;
         public bool ConfirmLaunches { get; set; } = true;
+        public bool MultiInstanceLaunching { get; set; } = true;
         public bool EnableRobloxBackgroundApp { get; set; } = false;
         public RobloxTheme RobloxTheme { get; set; } = RobloxTheme.Default;
         public string Locale { get; set; } = "nil";
@@ -72,6 +73,7 @@ namespace Bloxstrap.Models.Persistable
 
         // voice chat (see Integrations/VoiceChat.cs), only dev builds can talk
         public bool VoiceChatEnabled { get; set; } = true;
+        public bool ShowVoiceIndicators { get; set; } = true;
         public int VoiceChatVolume { get; set; } = 100;
         public string VoiceChatServer { get; set; } = "";
         public string VoiceChatKey { get; set; } = "";

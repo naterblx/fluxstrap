@@ -83,11 +83,10 @@ namespace Bloxstrap.UI.Elements.Overlay
 
         protected override void Update(Int32Rect client, double scale)
         {
-            Place(client.X, client.Y, client.Width, client.Height);
-
             double width = client.Width / scale, height = client.Height / scale;
             var camera = _voiceChat.Camera;
             var seen = new HashSet<string>();
+            var placed = new List<(Bubble Bubble, double Left, double Top)>();
 
             foreach (var speaker in _talking)
             {
@@ -115,8 +114,7 @@ namespace Bloxstrap.UI.Elements.Overlay
                 }
 
                 bubble.Root.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                Canvas.SetLeft(bubble.Root, point.X - bubble.Root.DesiredSize.Width / 2);
-                Canvas.SetTop(bubble.Root, point.Y - bubble.Root.DesiredSize.Height);
+                placed.Add((bubble, point.X - bubble.Root.DesiredSize.Width / 2, point.Y - bubble.Root.DesiredSize.Height));
             }
 
             foreach (string name in _bubbles.Keys.Where(x => !seen.Contains(x)).ToList())
@@ -124,6 +122,29 @@ namespace Bloxstrap.UI.Elements.Overlay
                 _canvas.Children.Remove(_bubbles[name].Root);
                 _bubbles.Remove(name);
             }
+
+            // everyone talking is off screen
+            if (placed.Count == 0)
+            {
+                Place(client.X, client.Y, 1, 1);
+                return;
+            }
+
+            // the window only covers the bubbles, not the whole game: on some PCs see-through windows come out
+            // solid white, and this way that's a small box rather than the whole screen
+            const double margin = 4;
+            double left = placed.Min(x => x.Left) - margin;
+            double top = placed.Min(x => x.Top) - margin;
+            double right = placed.Max(x => x.Left + x.Bubble.Root.DesiredSize.Width) + margin;
+            double bottom = placed.Max(x => x.Top + x.Bubble.Root.DesiredSize.Height) + margin;
+
+            foreach (var (bubble, bubbleLeft, bubbleTop) in placed)
+            {
+                Canvas.SetLeft(bubble.Root, bubbleLeft - left);
+                Canvas.SetTop(bubble.Root, bubbleTop - top);
+            }
+
+            Place(client.X + (int)(left * scale), client.Y + (int)(top * scale), (int)Math.Ceiling((right - left) * scale), (int)Math.Ceiling((bottom - top) * scale));
         }
 
         /// <summary>

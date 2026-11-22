@@ -330,7 +330,8 @@ namespace Bloxstrap
                 App.Terminate(ErrorCode.ERROR_FILE_NOT_FOUND);
             }
 
-            if (App.Settings.Prop.ConfirmLaunches && Utilities.IsRobloxRunning() && launchMode != LaunchMode.Studio)
+            // with multi-instance launching the open game isn't closed, so there's nothing to confirm
+            if (App.Settings.Prop.ConfirmLaunches && !App.Settings.Prop.MultiInstanceLaunching && Utilities.IsRobloxRunning() && launchMode != LaunchMode.Studio)
             {
                 // this currently doesn't work very well since it relies on checking the existence of the singleton mutex
                 // which often hangs around for a few seconds after the window closes

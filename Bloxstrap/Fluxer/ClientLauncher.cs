@@ -63,7 +63,8 @@ namespace Bloxstrap.Fluxer
                 return pid;
             }
 
-            if (package.Year == "2022")
+            // 2022 onwards launch the modern way. years newer than 2022 haven't been released yet, so they get 2022's launch
+            if (int.TryParse(package.Year, out int year) && year >= 2022)
             {
                 string args = $"--app -a {Quote(FluxerSite.AuthenticationUrl)} -t {Quote(request.Ticket!)} -j {Quote(request.JoinUrl!)} "
                     + $"--launchtime={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()} --rloc en_us --gloc en_us -b 0";
@@ -73,7 +74,7 @@ namespace Bloxstrap.Fluxer
 
                 int pid = ClientPatcher.Launch(executable, args, directory, FluxerSite.PatchedDomain, FluxerSite.Domain, PatchSeconds, result);
 
-                App.Logger.WriteLine(LOG_IDENT, $"2022 client pid={pid} patched={result.Patched}");
+                App.Logger.WriteLine(LOG_IDENT, $"{package.Year} client pid={pid} patched={result.Patched}");
 
                 return pid;
             }
@@ -123,7 +124,12 @@ namespace Bloxstrap.Fluxer
         {
             const string LOG_IDENT = "ClientLauncher::StartWithSingletonRename";
 
-            try
+            // without the rename a new client closes the one already open, like normal roblox
+            if (!App.Settings.Prop.MultiInstanceLaunching)
+            {
+                App.Logger.WriteLine(LOG_IDENT, "Multi-instance launching is off, starting normally");
+            }
+            else try
             {
                 using var process = SingletonRename.Start(executable, args, directory);
                 return process.Id;

@@ -92,7 +92,8 @@ namespace Bloxstrap
                 if (App.Settings.Prop.VoiceChatEnabled)
                 {
                     VoiceChat = new(ActivityWatcher, _watcherData.ProcessId);
-                    _voiceIndicators = new(VoiceChat, _watcherData.ProcessId);
+                    if (App.Settings.Prop.ShowVoiceIndicators)
+                        _voiceIndicators = new(VoiceChat, _watcherData.ProcessId);
 #if DEV_BUILD
                     _muteButton = new(VoiceChat, _watcherData.ProcessId);
 #endif
@@ -142,7 +143,9 @@ namespace Bloxstrap
 
             int ticks = 0;
 
-            while (Utilities.GetProcessesSafe().Any(x => x.Id == _watcherData.ProcessId))
+            // with several clients open there's only one watcher (the first one's), so it keeps the others' fps
+            // unlocked until they've all closed
+            while (Utilities.GetProcessesSafe().Any(x => x.Id == _watcherData.ProcessId) || AnyClientRunning())
             {
                 // the official launcher re-applies the cap every couple of seconds too, since the client can reset it
                 if (ticks++ % 2 == 0)
@@ -162,6 +165,30 @@ namespace Bloxstrap
 
             if (App.LaunchSettings.TestModeFlag.Active)
                 Process.Start(Paths.Process, "-settings -testmode");
+        }
+
+        private static bool AnyClientRunning()
+        {
+            string versionsPrefix = Paths.Versions.TrimEnd('\\') + "\\";
+
+            foreach (string name in new[] { App.FluxerPlayerAppName, App.RobloxPlayerAppName })
+            {
+                foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(name)))
+                {
+                    try
+                    {
+                        if (process.MainModule?.FileName?.StartsWith(versionsPrefix, StringComparison.OrdinalIgnoreCase) == true)
+                            return true;
+                    }
+                    catch (Exception) { }
+                    finally
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

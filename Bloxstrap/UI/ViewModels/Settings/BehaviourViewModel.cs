@@ -47,6 +47,12 @@
             set => App.Settings.Prop.EnableBetterMatchmakingRandomization = value;
         }
 
+        public bool MultiInstanceLaunching
+        {
+            get => App.Settings.Prop.MultiInstanceLaunching;
+            set => App.Settings.Prop.MultiInstanceLaunching = value;
+        }
+
         public bool ConfirmLaunches
         {
             get => App.Settings.Prop.ConfirmLaunches;

@@ -90,6 +90,13 @@
         </controls:OptionControl>
 
         <controls:OptionControl
+            Header="Show who's talking"
+            Description="A bubble over the head of whoever's talking, with bars for how loud they are. Takes effect the next time you join a game."
+            IsEnabled="{Binding InnerContent.IsChecked, ElementName=VoiceChatOption, Mode=OneWay}">
+            <ui:ToggleSwitch IsChecked="{Binding ShowVoiceIndicators, Mode=TwoWay}" />
+        </controls:OptionControl>
+
+        <controls:OptionControl
             Header="Voice chat volume"
             Description="{Binding VoiceChatVolumeText}"
             IsEnabled="{Binding InnerContent.IsChecked, ElementName=VoiceChatOption, Mode=OneWay}">

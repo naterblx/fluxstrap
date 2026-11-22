@@ -36,12 +36,13 @@ namespace Bloxstrap.UI.ViewModels.Settings
             {
                 var manifest = await ClientManifest.Fetch();
 
-                PlayerYears = manifest.GetDistinctFolders(false).Select(x => x.Year).ToList();
+                // the dev build can pick private builds too
+                PlayerYears = manifest.GetDistinctFolders(false, App.IsDevBuild).Select(x => x.Year).Distinct().ToList();
                 StudioYears = manifest.GetDistinctFolders(true).Select(x => x.Year).ToList();
 
-                Clients = manifest.GetDistinctFolders(false)
+                Clients = manifest.GetDistinctFolders(false, App.IsDevBuild)
                     .Concat(manifest.GetDistinctFolders(true))
-                    .Concat(manifest.Packages.Where(x => x.IsPrivate).Take(1))
+                    .Concat(App.IsDevBuild ? Enumerable.Empty<ClientPackage>() : manifest.Packages.Where(x => x.IsPrivate).Take(1))
                     .Select(x => new FluxerClientEntry
                     {
                         Label = x.Label,

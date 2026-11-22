@@ -106,7 +106,10 @@ internal static class SingletonRename
 		}
 		try
 		{
-			Dbg("patched=" + Patch(pi.hProcess));
+			// the official launcher renames every client's singleton to the same FLUXER_ name, so a second client
+			// still closes the first. naming it after the new client's process id gives each one its own
+			string tag = (pi.dwProcessId & 0xFFFFF).ToString("x5");
+			Dbg("patched=" + Patch(pi.hProcess, tag) + " name=F" + tag);
 		}
 		catch (Exception ex)
 		{
@@ -157,7 +160,138 @@ internal static class SingletonRename
 		return stringBuilder.ToString();
 	}
 
-	private static bool Patch(IntPtr p)
+	// the named objects to rename, as their first 8 chars. wide names are matched on the first 6:
+	// ROBLOX_singletonMutex / ROBLOX_singletonEvent, and RBXMAINWND-..., shared memory that holds the newest
+	// client's window, which a starting client closes
+	private static readonly string[] RenamedPrefixes = { "ROBLOX_s", "RBXMAINW" };
+
+	// imports that take an object name, and which argument it is (1 based)
+	private static readonly Dictionary<string, (int Argument, bool Wide)> NamedFunctions = new Dictionary<string, (int, bool)>
+	{
+		["CreateMutexA"] = (3, false),
+		["CreateMutexW"] = (3, true),
+		["OpenMutexA"] = (3, false),
+		["OpenMutexW"] = (3, true),
+		["CreateEventA"] = (4, false),
+		["CreateEventW"] = (4, true),
+		["OpenEventA"] = (3, false),
+		["OpenEventW"] = (3, true),
+		["CreateFileMappingA"] = (6, false),
+		["CreateFileMappingW"] = (6, true),
+		["OpenFileMappingA"] = (3, false),
+		["OpenFileMappingW"] = (3, true)
+	};
+
+	private const int SlotSize = 512;
+
+	private static uint[] Dwords(byte[] bytes)
+	{
+		uint[] result = new uint[bytes.Length / 4];
+		for (int i = 0; i < result.Length; i++)
+		{
+			result[i] = BitConverter.ToUInt32(bytes, i * 4);
+		}
+		return result;
+	}
+
+	private static uint[] AnsiDwords(string text) => Dwords(Encoding.ASCII.GetBytes(text));
+
+	private static uint[] WideDwords(string text) => Dwords(Encoding.Unicode.GetBytes(text));
+
+	/// <summary>
+	/// The hook for one import: if the name starts with one of RenamedPrefixes, the call gets a copy of it with
+	/// "F" + tag in front instead, then it carries on into the real function
+	/// </summary>
+	private static byte[] BuildStub(int argument, bool wide, long original, long buffer, string tag)
+	{
+		List<byte> code = new List<byte>();
+		List<int> toOriginal = new List<int>();
+		List<int> toMatched = new List<int>();
+		byte nameOffset = (byte)(argument * 4);
+		byte nameOffsetPushed = (byte)(nameOffset + 12);
+
+		void Jump(byte opcode, List<int> fixups)
+		{
+			code.Add(opcode);
+			fixups.Add(code.Count);
+			code.Add(0);
+		}
+
+		void Resolve(List<int> fixups)
+		{
+			foreach (int position in fixups)
+			{
+				int distance = code.Count - (position + 1);
+				if (distance > 127)
+				{
+					throw new InvalidOperationException("stub jump too far");
+				}
+				code[position] = (byte)distance;
+			}
+			fixups.Clear();
+		}
+
+		code.AddRange(new byte[] { 0x8B, 0x44, 0x24, nameOffset }); // mov eax, [esp + name]
+		code.AddRange(new byte[] { 0x85, 0xC0 });                   // test eax, eax
+		Jump(0x74, toOriginal);                                     // jz original
+
+		for (int i = 0; i < RenamedPrefixes.Length; i++)
+		{
+			bool last = i == RenamedPrefixes.Length - 1;
+			List<int> toNext = new List<int>();
+			uint[] prefix = wide ? WideDwords(RenamedPrefixes[i].Substring(0, 6)) : AnsiDwords(RenamedPrefixes[i]);
+
+			for (int d = 0; d < prefix.Length; d++)
+			{
+				code.AddRange(d == 0 ? new byte[] { 0x81, 0x38 } : new byte[] { 0x81, 0x78, (byte)(d * 4) }); // cmp dword [eax + d*4], prefix
+				code.AddRange(BitConverter.GetBytes(prefix[d]));
+				Jump(0x75, last ? toOriginal : toNext);                                                    // jne next prefix
+			}
+
+			Jump(0xEB, toMatched); // jmp matched
+			Resolve(toNext);
+		}
+
+		Resolve(toMatched);
+
+		code.AddRange(new byte[] { 0x56, 0x57, 0x51 });                   // push esi; push edi; push ecx
+		code.AddRange(new byte[] { 0x8B, 0x74, 0x24, nameOffsetPushed }); // mov esi, [esp + name]
+		code.Add(0xBF);                                                   // mov edi, buffer
+		code.AddRange(BitConverter.GetBytes((uint)buffer));
+		code.Add(0xB9);                                                   // mov ecx, longest name
+		code.AddRange(BitConverter.GetBytes(wide ? 62u : 63u));
+
+		int loop = code.Count;
+		code.AddRange(wide
+			? new byte[] { 0x66, 0xAD, 0x66, 0xAB, 0x66, 0x85, 0xC0 } // lodsw; stosw; test ax, ax
+			: new byte[] { 0xAC, 0xAA, 0x84, 0xC0 });                 // lodsb; stosb; test al, al
+		List<int> toDone = new List<int>();
+		Jump(0x74, toDone);                                           // jz done
+		code.Add(0x49);                                               // dec ecx
+		code.Add(0x75);                                               // jnz loop
+		code.Add((byte)(loop - (code.Count + 1)));
+		Resolve(toDone);
+
+		uint[] replacement = wide ? WideDwords("F" + tag) : AnsiDwords("F" + tag + "_s");
+		for (int d = 0; d < replacement.Length; d++)
+		{
+			code.AddRange(new byte[] { 0xC7, 0x05 });                     // mov dword [buffer + d*4], replacement
+			code.AddRange(BitConverter.GetBytes((uint)(buffer + d * 4)));
+			code.AddRange(BitConverter.GetBytes(replacement[d]));
+		}
+
+		code.AddRange(new byte[] { 0xC7, 0x44, 0x24, nameOffsetPushed }); // mov dword [esp + name], buffer
+		code.AddRange(BitConverter.GetBytes((uint)buffer));
+		code.AddRange(new byte[] { 0x59, 0x5F, 0x5E });                   // pop ecx; pop edi; pop esi
+
+		Resolve(toOriginal);
+		code.AddRange(new byte[] { 0xFF, 0x25 });                         // jmp [original]
+		code.AddRange(BitConverter.GetBytes((uint)original));
+
+		return code.ToArray();
+	}
+
+	private static bool Patch(IntPtr p, string tag)
 	{
 		if (NtQueryInformationProcess(p, 26, out var info, IntPtr.Size, out var _) != 0 || info == IntPtr.Zero)
 		{
@@ -176,15 +310,6 @@ internal static class SingletonRename
 		{
 			return false;
 		}
-		Dictionary<string, int[]> dictionary = new Dictionary<string, int[]>();
-		dictionary["CreateMutexA"] = new int[2] { 3, 0 };
-		dictionary["CreateMutexW"] = new int[2] { 3, 1 };
-		dictionary["OpenMutexA"] = new int[2] { 3, 0 };
-		dictionary["OpenMutexW"] = new int[2] { 3, 1 };
-		dictionary["CreateEventA"] = new int[2] { 4, 0 };
-		dictionary["CreateEventW"] = new int[2] { 4, 1 };
-		dictionary["OpenEventA"] = new int[2] { 3, 0 };
-		dictionary["OpenEventW"] = new int[2] { 3, 1 };
 		List<KeyValuePair<long, string>> list = new List<KeyValuePair<long, string>>();
 		long num5 = num + num4;
 		while (true)
@@ -214,7 +339,7 @@ internal static class SingletonRename
 					if ((num10 & 0x80000000u) == 0)
 					{
 						string text = CString(p, num + num10 + 2);
-						if (dictionary.ContainsKey(text))
+						if (NamedFunctions.ContainsKey(text))
 						{
 							list.Add(new KeyValuePair<long, string>(num + num8 + num9 * 4, text));
 						}
@@ -229,129 +354,37 @@ internal static class SingletonRename
 		{
 			return false;
 		}
-		IntPtr intPtr = VirtualAllocEx(p, IntPtr.Zero, new IntPtr(4096), 12288u, 64u);
+		// a slot per hook (stub, then the real function's address at +256, then the renamed name at +320),
+		// followed by the code that installs them
+		int allocationSize = (list.Count * SlotSize + 512 + 4095) / 4096 * 4096;
+		IntPtr intPtr = VirtualAllocEx(p, IntPtr.Zero, new IntPtr(allocationSize), 12288u, 64u);
 		if (intPtr == IntPtr.Zero)
 		{
 			return false;
 		}
 		long num11 = intPtr.ToInt64();
-		if (list.Count * 512 > 3584)
-		{
-			return false;
-		}
-		long num12 = num11;
 		List<long> list2 = new List<long>();
 		List<long> list3 = new List<long>();
-		foreach (KeyValuePair<long, string> item in list)
+		for (int k = 0; k < list.Count; k++)
 		{
-			int[] array = dictionary[item.Value];
-			bool flag = array[1] == 1;
-			long num13 = num12;
-			long num14 = num13 + 256;
-			long num15 = num13 + 320;
-			byte b = (byte)(array[0] * 4);
-			byte b2 = (byte)(array[0] * 4 + 12);
-			List<byte> list4 = new List<byte>();
-			List<int> list5 = new List<int>();
-			byte[] obj = new byte[4] { 139, 68, 36, 0 };
-			obj[3] = b;
-			list4.AddRange(obj);
-			list4.AddRange(new byte[2] { 133, 192 });
-			list5.Add(list4.Count);
-			list4.AddRange(new byte[2] { 116, 0 });
-			if (!flag)
-			{
-				list4.AddRange(new byte[2] { 129, 56 });
-				list4.AddRange(BitConverter.GetBytes(1279414098u));
-				list5.Add(list4.Count);
-				list4.AddRange(new byte[2] { 117, 0 });
-				list4.AddRange(new byte[3] { 129, 120, 4 });
-				list4.AddRange(BitConverter.GetBytes(1935628367u));
-				list5.Add(list4.Count);
-				list4.AddRange(new byte[2] { 117, 0 });
-			}
-			else
-			{
-				list4.AddRange(new byte[2] { 129, 56 });
-				list4.AddRange(BitConverter.GetBytes(5177426u));
-				list5.Add(list4.Count);
-				list4.AddRange(new byte[2] { 117, 0 });
-				list4.AddRange(new byte[3] { 129, 120, 4 });
-				list4.AddRange(BitConverter.GetBytes(4980802u));
-				list5.Add(list4.Count);
-				list4.AddRange(new byte[2] { 117, 0 });
-				list4.AddRange(new byte[3] { 129, 120, 8 });
-				list4.AddRange(BitConverter.GetBytes(5767247u));
-				list5.Add(list4.Count);
-				list4.AddRange(new byte[2] { 117, 0 });
-			}
-			list4.AddRange(new byte[3] { 86, 87, 81 });
-			byte[] obj2 = new byte[4] { 139, 116, 36, 0 };
-			obj2[3] = b2;
-			list4.AddRange(obj2);
-			list4.Add(191);
-			list4.AddRange(BitConverter.GetBytes((uint)num15));
-			list4.Add(185);
-			list4.AddRange(BitConverter.GetBytes(flag ? 62u : 63u));
-			int count = list4.Count;
-			if (!flag)
-			{
-				list4.AddRange(new byte[4] { 172, 170, 132, 192 });
-			}
-			else
-			{
-				list4.AddRange(new byte[7] { 102, 173, 102, 171, 102, 133, 192 });
-			}
-			int count2 = list4.Count;
-			list4.AddRange(new byte[2] { 116, 0 });
-			list4.Add(73);
-			list4.AddRange(new byte[2]
-			{
-				117,
-				(byte)(count - (list4.Count + 2))
-			});
-			list4[count2 + 1] = (byte)(list4.Count - (count2 + 2));
-			uint value3 = (flag ? 4980806u : 1481985094u);
-			uint value4 = (flag ? 5767253u : 1935626821u);
-			list4.AddRange(new byte[2] { 199, 5 });
-			list4.AddRange(BitConverter.GetBytes((uint)num15));
-			list4.AddRange(BitConverter.GetBytes(value3));
-			list4.AddRange(new byte[2] { 199, 5 });
-			list4.AddRange(BitConverter.GetBytes((uint)((int)num15 + 4)));
-			list4.AddRange(BitConverter.GetBytes(value4));
-			if (flag)
-			{
-				list4.AddRange(new byte[2] { 199, 5 });
-				list4.AddRange(BitConverter.GetBytes((uint)((int)num15 + 8)));
-				list4.AddRange(BitConverter.GetBytes(5374021u));
-			}
-			byte[] obj3 = new byte[4] { 199, 68, 36, 0 };
-			obj3[3] = b2;
-			list4.AddRange(obj3);
-			list4.AddRange(BitConverter.GetBytes((uint)num15));
-			list4.AddRange(new byte[3] { 89, 95, 94 });
-			foreach (int item2 in list5)
-			{
-				list4[item2 + 1] = (byte)(list4.Count - (item2 + 2));
-			}
-			list4.AddRange(new byte[2] { 255, 37 });
-			list4.AddRange(BitConverter.GetBytes((uint)num14));
-			if (list4.Count > 256)
+			var (argument, wide) = NamedFunctions[list[k].Value];
+			long slot = num11 + k * SlotSize;
+			byte[] stub = BuildStub(argument, wide, slot + 256, slot + 320, tag);
+			if (stub.Length > 256)
 			{
 				return false;
 			}
-			byte[] array2 = new byte[512];
+			byte[] array2 = new byte[SlotSize];
 			for (int i = 0; i < 256; i++)
 			{
 				array2[i] = 204;
 			}
-			list4.CopyTo(array2);
-			Write(p, num13, array2, keepWritable: true);
-			list2.Add(num13);
-			list3.Add(num14);
-			num12 += 512;
+			stub.CopyTo(array2, 0);
+			Write(p, slot, array2, keepWritable: true);
+			list2.Add(slot);
+			list3.Add(slot + 256);
 		}
-		long num16 = num11 + 3584;
+		long num16 = num11 + list.Count * SlotSize;
 		long num17 = 0L;
 		long num18 = 0L;
 		long num19 = 0L;
@@ -427,7 +460,7 @@ internal static class SingletonRename
 			Write(p, num21, list7.ToArray(), keepWritable: true);
 		}
 		Dbg("hook via " + (flag2 ? ("tls callback " + num19.ToString("x")) : ("entry point " + num21.ToString("x"))) + " inst=" + num16.ToString("x"));
-		FlushInstructionCache(p, intPtr, new IntPtr(4096));
+		FlushInstructionCache(p, intPtr, new IntPtr(allocationSize));
 		FlushInstructionCache(p, new IntPtr(flag2 ? num18 : num21), new IntPtr(16));
 		return true;
 	}
